@@ -1,0 +1,8 @@
+# this file is just for your board in general, and doesnt provide any settings based on your specific board which is why we need a plaitpilot.yaml file. wtf
+board:
+  name: plaitpilot
+  # name of directory that is holding this board
+  vendor: custom
+  # this is just names for any SoCs, not where the actual SoC selection occurs (happens in Kconfig)
+  socs:
+  - name: esp32
