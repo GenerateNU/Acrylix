@@ -14,3 +14,4 @@ manifest:
           - cmsis-nn
           - cmsis_6
           - hal_espressif
+          - hal_stm32
