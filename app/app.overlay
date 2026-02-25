@@ -38,7 +38,7 @@
             width = <320>;
             height = <240>;
             pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
-            rotation = <0>;
+            rotation = <90>;
             frmctr1 = [00 1b];
             pwctrl1 = [26 00];
             vmctrl1 = [31 3c];

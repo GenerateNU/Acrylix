@@ -1,7 +1,7 @@
 #include "display.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
-#include <zephyr/input/input.h>
+//#include <zephyr/input/input.h>
 #include <lvgl.h>
 #include <stdio.h>
 
