@@ -1,16 +1,16 @@
-#include <zephyr/kernel.h>
+/*#include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <zephyr/sys/printk.h>
 
 /*Pin definitions -- pin config in .overlay*/
-#define STEP_NODE DT_ALIAS(stepper_step)
+/*#define STEP_NODE DT_ALIAS(stepper_step)
 #define DIR_NODE DT_ALIAS(stepper_dir)
 
 static const struct gpio_dt_spec step_pin = GPIO_DT_SPEC_GET(STEP_NODE, gpios);
 static const struct gpio_dt_spec dir_pin = GPIO_DT_SPEC_GET(DIR_NODE, gpios);
 
 /* Motor config*/
-#define MICROSTEPS 100
+/*#define MICROSTEPS 100
 #define STEPS_PER_REV 20000
 #define TARGET_RPM 100.0f
 
@@ -19,9 +19,9 @@ static const struct gpio_dt_spec dir_pin = GPIO_DT_SPEC_GET(DIR_NODE, gpios);
 #define DIR_FORWARD 1
 #define DIR_BACKWARD 0
 
-static void rotate_steps(long steps, int direction)
+/*static void rotate_steps(long steps, int direction)
 {
-    gpio_pin_set(&dir_pin, direction);
+    gpio_pin_set_dt(&dir_pin, direction);
     k_msleep(5); // DIR must settle ≥5 µs before first pulse
 
     for (long i = 0; i < steps; i++) {
@@ -32,12 +32,14 @@ static void rotate_steps(long steps, int direction)
     }
 }
 
+/*
 int main(void)
 {
     int ret;
 
      /* Check if GPIO devices are ready */
-    if (!gpio_is_ready_dt(&step_pin)) {
+    /*
+     if (!gpio_is_ready_dt(&step_pin)) {
         printk("STEP GPIO not ready\n");
         return -1;
     }
@@ -47,6 +49,7 @@ int main(void)
     }
 
    /* Configure pins as outputs */
+   /*
     ret = gpio_pin_configure_dt(&step_pin, GPIO_OUTPUT_INACTIVE);
     if (ret < 0) { printk("Failed to configure STEP pin\n"); return ret; }
 
@@ -60,15 +63,17 @@ int main(void)
 
     while (1) {
         /* 1 full revolution forward */
+        /*
         printk("Forward...\n");
         rotate_steps(STEPS_PER_REV, DIR_FORWARD);
         k_sleep(K_MSEC(1000));
 
         /* 1 full revolution backward */
+        /*
         printk("Backward...\n");
         rotate_steps(STEPS_PER_REV, DIR_BACKWARD);
         k_sleep(K_MSEC(1000));
     }
 
     return 0;
-}
+} *
