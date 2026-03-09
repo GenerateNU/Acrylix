@@ -1,4 +1,4 @@
-#include "state.h"
+#include "src/states/states.h"
 #include <zephyr/kernel.h>
 
 /* State machine context */
