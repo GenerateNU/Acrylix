@@ -3,7 +3,22 @@
 
 / {
     chosen {
-        zephyr,display = &ili9341;
+        zephyr,display = &ili9341;  //for display
+    };
+
+    aliases {
+        stepper-step = &stepper_step_gpio;
+        stepper-dir = &stepper_dir_gpio;
+    };
+
+    stepper_step_gpio: stepper_step {
+        compatible = "gpio-leds";
+        gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    //change pin later
+    };
+
+    stepper_dir_gpio: stepper_dir {
+        compatible = "gpio-leds";
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    //change pin later
     };
 
     leds {
