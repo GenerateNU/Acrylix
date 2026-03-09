@@ -7,17 +7,17 @@
     };
 
     aliases {
-        stepper-step = &stepper_step_gpio;
-        stepper-dir = &stepper_dir_gpio;
+        stepper-step = &stepper_step;
+        stepper-dir = &stepper_dir;
     };
 
     stepper_step_gpio: stepper_step {
-        compatible = "gpio-leds";
+        compatible = "gpio-keys";
         gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    //change pin later
     };
 
     stepper_dir_gpio: stepper_dir {
-        compatible = "gpio-leds";
+        compatible = "gpio-keys";
         gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    //change pin later
     };
 

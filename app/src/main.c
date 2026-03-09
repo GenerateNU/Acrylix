@@ -3,7 +3,7 @@
 #include <zephyr/drivers/gpio.h>
 #include <lvgl.h>
 #include <zephyr/input/input.h>
-#include "display.h"
+#include "display/display.h"
 
 extern void lv_demo_widgets(void);
 

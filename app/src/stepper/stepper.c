@@ -21,7 +21,7 @@ static const struct gpio_dt_spec dir_pin = GPIO_DT_SPEC_GET(DIR_NODE, gpios);
 
 static void rotate_steps(long steps, int direction)
 {
-    gpio_pin_set(&dir_pin, direction);
+    gpio_pin_set_dt(&dir_pin, direction);
     k_msleep(5); // DIR must settle ≥5 µs before first pulse
 
     for (long i = 0; i < steps; i++) {
