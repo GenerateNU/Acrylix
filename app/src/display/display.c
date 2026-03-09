@@ -1,4 +1,4 @@
-#include "display.h"
+#include "display/display.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
 /* #include <zephyr/input/input.h> */
