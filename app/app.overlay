@@ -44,8 +44,10 @@
         sample-time-us = <2000>;
         idle-timeout-ms = <200>;
         status = "okay";
+    };
 
-ompatible = "zephyr,mipi-dbi-spi";
+    mipi_dbi: mipi-dbi-spi {
+        compatible = "zephyr,mipi-dbi-spi";
         dc-gpios = <&gpiob 8 GPIO_ACTIVE_HIGH>;
         reset-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
         spi-dev = <&spi1>;
