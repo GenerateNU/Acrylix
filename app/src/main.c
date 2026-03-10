@@ -9,7 +9,11 @@ extern void lv_demo_widgets(void);
 
 /* Get LED from device tree */
 const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
-const struct device *enc = DEVICE_DT_GET(DT_NODELABEL(encoder));
+//const struct gpio_dt_spec *enc = GPIO_DT_SPEC_GET(DT_NODELABEL(encoder), gpio);
+
+/* encoder */
+//const struct gpio_dt_spec enc_a = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(encoder), gpios, 0); //test for encoder
+//const struct gpio_dt_spec enc_b = GPIO_DT_SPEC_GET_BY_IDX(DT_NODELABEL(encoder), gpios, 1); //test for encoder
 
 static void any_input_cb(struct input_event *evt, void *user_data)
 {
@@ -35,6 +39,9 @@ int main(void)
     display_create_home_screen();
 
     while (1) {
+        //int a = gpio_pin_get_dt(&enc_a);    //for encoder test
+        //int b = gpio_pin_get_dt(&enc_b);    //for encoder test
+        //printk("A: %d, B: %d\n", a, b);  //for encoder test
         display_update();
         k_msleep(10);
     }

@@ -10,7 +10,6 @@
 static const struct device *display_dev;
 static lv_obj_t *position_label;
 static lv_obj_t *direction_label;
-static lv_obj_t *bar;
 
 /* ── Encoder state ── */
 static int position = 0;
@@ -20,15 +19,12 @@ static int direction = 0;
 static void encoder_cb(struct input_event *evt, void *user_data)
 {
     ARG_UNUSED(user_data);
-    
-    printk("Event type: %d code: %d value: %d\n", evt->type, evt->code, evt->value);
 
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
         if (evt->value > 0) {
             position++;
             direction = 1;
-        }
-        else{
+        } else {
             position--;
             direction = -1;
         }
@@ -36,7 +32,6 @@ static void encoder_cb(struct input_event *evt, void *user_data)
         char pos_str[16];
         printk("%d", position);
         printk("%d", direction);
-        //position++;
         snprintf(pos_str, sizeof(pos_str), "%d", position);
         lv_label_set_text(position_label, pos_str);
 
@@ -82,12 +77,6 @@ int display_init(void)
     printk("Display width: %d height: %d\n", caps.x_resolution, caps.y_resolution);
     printk("Pixel format: %d\n", caps.current_pixel_format);
 
-    const struct device *enc_dev = DEVICE_DT_GET(DT_NODELABEL(encoder));
-    if (!device_is_ready(enc_dev)) {
-        printk("Encoder device NOT ready!\n");
-    } else {
-        printk("Encoder device ready\n");
-    }
     return 0;
 }
 
@@ -114,23 +103,7 @@ void display_create_home_screen(void)
     direction_label = lv_label_create(lv_scr_act());
     lv_label_set_text(direction_label, "---");
     lv_obj_align(direction_label, LV_ALIGN_BOTTOM_RIGHT, -20, -10);
-
-    /* progress bar*/
-    lv_obj_t *bar = lv_bar_create(lv_scr_act());
-    lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 30);
-    lv_bar_set_value(bar, 100, LV_ANIM_ON);
 }
-
-/* progress bar function
-void lv_bar(void)
-{
-    lv_obj_t *bar = lv_bar_create(lv_scr_act(), NULL);
-    lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, NULL, LV_ALIGN_CENTER, 0, 20);
-    lv_bar_set_anim_time(bar, 2000);
-    lv_bar_set_value(bar, 100, LV_ANIM_ON);
-} */
 
 void display_update(void)
 {
