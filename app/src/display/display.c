@@ -1,13 +1,14 @@
 #include "display.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
-/* #include <zephyr/input/input.h> */
 #include <zephyr/input/input.h> 
 #include <lvgl.h>
 #include <stdio.h>
 
 /* ── Display ── */
 static const struct device *display_dev;
+
+/* UI Elements*/
 static lv_obj_t *position_label;
 static lv_obj_t *direction_label;
 static lv_obj_t *bar;
@@ -23,20 +24,28 @@ static void encoder_cb(struct input_event *evt, void *user_data)
     
     printk("Event type: %d code: %d value: %d\n", evt->type, evt->code, evt->value);
 
+    /* Reads encoder input and changes position and direction value*/
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
         if (evt->value > 0) {
             position++;
+            if (position > 100){
+                position = 100;
+            }
             direction = 1;
         }
         else{
             position--;
+            if (position < 0) {
+                position = 0;
+            }
             direction = -1;
         }
+
+        lv_bar_set_value(bar, position, LV_ANIM_ON);    //animates the bar
 
         char pos_str[16];
         printk("%d", position);
         printk("%d", direction);
-        //position++;
         snprintf(pos_str, sizeof(pos_str), "%d", position);
         lv_label_set_text(position_label, pos_str);
 
@@ -53,11 +62,13 @@ static void encoder_cb(struct input_event *evt, void *user_data)
 
 INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
 
+/* Get encoder position */
 int encoder_get_position(void)
 {
     return position;
 }
 
+/* Get encoder direction */
 int encoder_get_direction(void)
 {
     int dir = direction;
@@ -65,6 +76,7 @@ int encoder_get_direction(void)
     return dir;
 }
 
+/* Initialize display */
 int display_init(void)
 {
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
@@ -91,6 +103,7 @@ int display_init(void)
     return 0;
 }
 
+/* Creates UI screen */
 void display_create_home_screen(void)
 {
     printk("create home screen\n");
@@ -115,23 +128,15 @@ void display_create_home_screen(void)
     lv_label_set_text(direction_label, "---");
     lv_obj_align(direction_label, LV_ALIGN_BOTTOM_RIGHT, -20, -10);
 
-    /* progress bar*/
-    lv_obj_t *bar = lv_bar_create(lv_scr_act());
+    /* Progress bar*/
+    bar = lv_bar_create(lv_scr_act());
     lv_obj_set_size(bar, 200, 20);
     lv_obj_align(bar, LV_ALIGN_CENTER, 0, 30);
-    lv_bar_set_value(bar, 100, LV_ANIM_ON);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 100, LV_ANIM_OFF);
 }
 
-/* progress bar function
-void lv_bar(void)
-{
-    lv_obj_t *bar = lv_bar_create(lv_scr_act(), NULL);
-    lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, NULL, LV_ALIGN_CENTER, 0, 20);
-    lv_bar_set_anim_time(bar, 2000);
-    lv_bar_set_value(bar, 100, LV_ANIM_ON);
-} */
-
+/* Updates the display */
 void display_update(void)
 {
     lv_task_handler();
