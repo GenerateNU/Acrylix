@@ -1,5 +1,6 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/display/panel.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
     chosen {
@@ -7,17 +8,22 @@
     };
 
     aliases {
-        stepper-step = &stepper_step;
-        stepper-dir = &stepper_dir;
+        stepper-step = &stepper_step_gpio;
+        stepper-dir = &stepper_dir_gpio;
+    };
+
+    lvgl_encoder: lvgl_encoder {
+        compatible = "zephyr,lvgl-encoder-input";
+        rotation-input-code = <INPUT_REL_X>;
     };
 
     stepper_step_gpio: stepper_step {
-        compatible = "gpio-keys";
+        compatible = "gpio-leds";
         gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    //change pin later
     };
 
     stepper_dir_gpio: stepper_dir {
-        compatible = "gpio-keys";
+        compatible = "gpio-leds";
         gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    //change pin later
     };
 
@@ -30,15 +36,16 @@
     };
 
     encoder: encoder {
-        compatible = "rotary-encoder";
-        gpios = <&gpiob 3 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>,
-                <&gpioa 10 (GPIO_ACTIVE_LOW | GPIO_PULL_UP)>;
-        zephyr,axis = <0>;
+        compatible = "gpio-qdec";
+        gpios = <&gpiob 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,
+                <&gpioa 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        zephyr,axis = <INPUT_REL_X>;
         steps-per-period = <4>;
-    };
+        sample-time-us = <2000>;
+        idle-timeout-ms = <200>;
+        status = "okay";
 
-    mipi_dbi: mipi-dbi-spi {
-        compatible = "zephyr,mipi-dbi-spi";
+ompatible = "zephyr,mipi-dbi-spi";
         dc-gpios = <&gpiob 8 GPIO_ACTIVE_HIGH>;
         reset-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
         spi-dev = <&spi1>;
