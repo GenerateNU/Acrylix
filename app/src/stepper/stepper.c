@@ -19,7 +19,7 @@ static const struct gpio_dt_spec dir_pin = GPIO_DT_SPEC_GET(DIR_NODE, gpios);
 #define DIR_FORWARD 1
 #define DIR_BACKWARD 0
 
-static void rotate_steps(long steps, int direction)
+void rotate_steps(long steps, int direction)
 {
     gpio_pin_set_dt(&dir_pin, direction);
     k_msleep(5); // DIR must settle ≥5 µs before first pulse
@@ -32,7 +32,7 @@ static void rotate_steps(long steps, int direction)
     }
 }
 
-int main(void)
+int stepper_init(void)
 {
     int ret;
 
@@ -58,17 +58,18 @@ int main(void)
     printk("Steps/rev:     %d\n",   STEPS_PER_REV);
     printk("Step delay us: %u\n",   STEP_DELAY_US);
 
+    /* rotate steps
     while (1) {
         /* 1 full revolution forward */
-        printk("Forward...\n");
+     /*  printk("Forward...\n");
         rotate_steps(STEPS_PER_REV, DIR_FORWARD);
         k_sleep(K_MSEC(1000));
 
         /* 1 full revolution backward */
-        printk("Backward...\n");
+    /*  printk("Backward...\n");
         rotate_steps(STEPS_PER_REV, DIR_BACKWARD);
         k_sleep(K_MSEC(1000));
-    }
+    } */
 
     return 0;
 }

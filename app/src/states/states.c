@@ -36,7 +36,7 @@ void sm_transition(system_state_t new_state)
 
     printk("State: %s -> %s \n", get_state_name(g_sm.current), (get_state_name(new_state)));
 
-    g_sm.previosu = g_sm.current;
+    g_sm.previous = g_sm.current;
     g_sm.current = new_state;
 
     /*Reset flags after each transition*/

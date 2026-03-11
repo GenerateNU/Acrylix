@@ -8,8 +8,8 @@
     };
 
     aliases {
-        stepper-step = &stepper_step_gpio;
-        stepper-dir = &stepper_dir_gpio;
+        stepper-step = &stepper_step_pin;
+        stepper-dir = &stepper_dir_pin;
     };
 
     lvgl_encoder: lvgl_encoder {
@@ -19,12 +19,18 @@
 
     stepper_step_gpio: stepper_step {
         compatible = "gpio-leds";
-        gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    //change pin later
+        stepper_step_pin: stepper_step_pin {
+            gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+            label = "Stepper Step";
+        };
     };
 
     stepper_dir_gpio: stepper_dir {
         compatible = "gpio-leds";
-        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    //change pin later
+        stepper_dir_pin: stepper_dir_pin {
+            gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;
+            label = "Stepper Dir";
+        };
     };
 
     leds {
