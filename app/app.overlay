@@ -20,7 +20,7 @@
     stepper_step_gpio: stepper_step {
         compatible = "gpio-leds";
         stepper_step_pin: stepper_step_pin {
-            gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+            gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;
             label = "Stepper Step";
         };
     };
@@ -28,7 +28,7 @@
     stepper_dir_gpio: stepper_dir {
         compatible = "gpio-leds";
         stepper_dir_pin: stepper_dir_pin {
-            gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;
+            gpios = <&gpiob 1 GPIO_ACTIVE_HIGH>;
             label = "Stepper Dir";
         };
     };

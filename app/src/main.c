@@ -1,8 +1,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include <lvgl.h>
 #include <zephyr/input/input.h>
+#include <lvgl.h>
 #include "display/display.h"
 #include "stepper/stepper.h"
 
@@ -24,13 +24,14 @@ int main(void)
 
     //const struct device *display = DEVICE_DT_GET(DT_CHOSEN(zephyr_display));
 
+    /* testing stepper motor*/
     if (stepper_init() != 0) {
         printk("Stepper motor could not initialize \n");
         return -1;
     }
 
     while (1){
-    /* 1 full revolution forward */
+        /* 1 full revolution forward */
         printk("Forward...\n");
         rotate_steps(STEPS_PER_REV, DIR_FORWARD);
         k_sleep(K_MSEC(1000));
