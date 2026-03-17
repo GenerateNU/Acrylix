@@ -16,6 +16,8 @@
 const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 //const struct device *enc = DEVICE_DT_GET(DT_NODELABEL(encoder));
 
+K_MSGQ_DEFINE(event_queue, sizeof(system_event_t), 8, 4);
+
 /* ── Input callback (testing) ──────────────────────────────────────────── */
 static void any_input_cb(struct input_event *evt, void *user_data)
 {

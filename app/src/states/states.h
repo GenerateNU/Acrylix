@@ -4,13 +4,6 @@
 #include <zephyr/kernel.h>
 #include <stdbool.h>
 
-extern struct k_msgq event_queue;
-
-static inline void event_post(system_event_t evt)
-{
-    k_msgq_put(&event_queue, &evt, K_NO_WAIT);
-}
-
 /* System states */
 typedef enum {
     STATE_IDLE,
@@ -33,6 +26,13 @@ typedef enum {
     EVT_START_COMPLETE,
     EVT_ERROR
 } system_event_t;
+
+extern struct k_msgq event_queue;
+
+static inline void event_post(system_event_t evt)
+{
+    k_msgq_put(&event_queue, &evt, K_NO_WAIT);
+}
 
 /* Error codes */
 typedef enum {
