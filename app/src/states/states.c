@@ -1,4 +1,4 @@
-#include "state.h"
+#include "states.h"
 #include <zephyr/kernel.h>
 
 /* State machine context */
@@ -19,7 +19,7 @@ const char* get_state_name(system_state_t state)
     switch (state) {
         case STATE_IDLE:            return "IDLE";
         case STATE_HOMING:          return "HOMING";
-        case STATE_INTIALIZATION:   return "INTIALIZATION";
+        case STATE_INITIALIZATION:   return "INITIALIZATION";
         case STATE_BEND:            return "BEND";
         case STATE_COOL:            return "COOL";
         case STATE_COMPLETE:        return "COMPLETE";
@@ -36,7 +36,7 @@ void sm_transition(system_state_t new_state)
 
     printk("State: %s -> %s \n", get_state_name(g_sm.current), (get_state_name(new_state)));
 
-    g_sm.previosu = g_sm.current;
+    g_sm.previous = g_sm.current;
     g_sm.current = new_state;
 
     /*Reset flags after each transition*/

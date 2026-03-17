@@ -10,4 +10,5 @@ project(app)
 # this didn't work when this was called app. It must be called app because... TO-DO...
 target_sources(app PRIVATE 
 	src/main.c
-	src/display.c)
+	src/display/display.c
+	src/states/states.c)
