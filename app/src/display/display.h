@@ -17,6 +17,8 @@ void display_update(void);
 /* UI creation functions - add more as your project grows */
 void display_create_home_screen(void);
 
+void display_update_state(int state);
+
 /*encoder */
 int encoder_get_position(void);
 int encoder_get_direction(void);

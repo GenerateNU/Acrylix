@@ -28,6 +28,7 @@ typedef enum {
 } system_event_t;
 
 extern struct k_msgq event_queue;
+extern struct k_msgq display_queue;
 
 static inline void event_post(system_event_t evt)
 {
@@ -63,4 +64,8 @@ const char* get_state_name(system_state_t state);   //get state name
 void sm_transition(system_state_t new_state);   //transition to new state
 void sm_init(void); //initialize state machine
 
+/* Display message */
+typedef struct {
+    system_state_t state;
+} display_msg_t;
 #endif  //STATE_H

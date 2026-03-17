@@ -17,6 +17,8 @@ const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 //const struct device *enc = DEVICE_DT_GET(DT_NODELABEL(encoder));
 
 K_MSGQ_DEFINE(event_queue, sizeof(system_event_t), 8, 4);
+K_MSGQ_DEFINE(display_queue, sizeof(display_msg_t), 4, 4);
+
 
 /* ── Input callback (testing) ──────────────────────────────────────────── */
 static void any_input_cb(struct input_event *evt, void *user_data)
@@ -30,7 +32,7 @@ INPUT_CALLBACK_DEFINE(NULL, any_input_cb, NULL);
 #define STATE_STACK_SIZE    2048
 #define STATE_PRIORITY      7
 
-#define DISPLAY_STACK_SIZE  1024
+#define DISPLAY_STACK_SIZE  4096
 #define DISPLAY_PRIORITY    6
 
 /*
@@ -111,12 +113,26 @@ void display_thread(void *p1, void *p2, void *p3)
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
     printk("Display thread started\n");
 
-    while (1) {
-        display_create_home_screen();
-        k_sleep(K_MSEC(100));
+    if(display_init() != 0) {
+        printk("Failed to initialize display\n");
+        return;
+    }
+
+    display_create_home_screen();
+
+    display_msg_t dmsg;
+    while(1) {
+        while(k_msgq_get(&display_queue, &dmsg, K_NO_WAIT) == 0) {
+            display_set_state(dmsg.state);
+        }
+        display_update();
+        k_sleep(K_MSEC(10));
+
+         /* Update encoder direction on display */
     }
 }
 
+/*
 void stepper_thread(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
@@ -126,7 +142,7 @@ void stepper_thread(void *p1, void *p2, void *p3)
         //stepper_handler_run();
         k_sleep(K_MSEC(100));
     }
-}
+}*/
 
 /* 
 void temp_thread(void *p1, void *p2, void *p3)
@@ -150,13 +166,6 @@ int main(void)
 
     /* Initialize UI */
     /* TODO: display_init() */
-    display_init();
-
-    if (display_init() != 0) {
-        printk("could not initialize display\n");
-        return -1;
-    }
-
      /* Initialize input */
 
     /* Initialize stepper */
@@ -193,6 +202,7 @@ int main(void)
     k_thread_name_set(temp_tid, "temperature");
     printk("Temperature thread created\n");*/
 
+    k_sleep(K_FOREVER);
     return 0;
 
     /* ── LCD testing ──────────────────────────────────────────────────────
