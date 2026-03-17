@@ -54,27 +54,44 @@ void state_thread(void *p1, void *p2, void *p3)
     printk("Initial state: %s\n", get_state_name(g_sm.previous));
 
     while (1) {
-
-        //handle_board_logic(); 
+    //add error events later
        switch (g_sm.current) {
             case STATE_IDLE:
                 /* add input_handler and display_handler*/
+                k_sleep(K_SECONDS(10));
+                sm_transition(STATE_INITIALIZATION);
+                /* --- use when events are needed
+                if (evt == EVT_START_INIT){
+                    sm_transition(STATE_INITIALIZATION);
+                } */
                 break;
             case STATE_INITIALIZATION:
-                 /* add homing_handler */
+                /* add homing_handler */
                 /* add temp_handler and stepper_handler */
+                k_sleep(K_SECONDS(5));
+                sm_transition(STATE_BEND);
                 break;
             case STATE_BEND:
                 /* add bend_handler */
+                k_sleep(K_SECONDS(5));
+                sm_transition(STATE_COOL);
                 break;
             case STATE_COOL:
                 /* add cooling_handler */
+                k_sleep(K_SECONDS(5));
+                sm_transition(STATE_COMPLETE);
                 break;
             case STATE_COMPLETE:
+                k_sleep(K_SECONDS(5));
+                sm_transition(STATE_HOMING);
                 break;
             case STATE_HOMING:
+                k_sleep(K_SECONDS(5));
+                sm_transition(STATE_IDLE);
                 break;
             case STATE_ERROR:
+                k_sleep(K_SECONDS(10));
+                sm_transition(STATE_IDLE);
                 break;
             default:
                 printk("Unknown state: %d", g_sm.current);

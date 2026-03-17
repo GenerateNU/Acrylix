@@ -17,13 +17,27 @@ sm_ctx_t g_sm = {
 const char* get_state_name(system_state_t state)
 {
     switch (state) {
-        case STATE_IDLE:            return "IDLE";
-        case STATE_HOMING:          return "HOMING";
-        case STATE_INITIALIZATION:   return "INITIALIZATION";
-        case STATE_BEND:            return "BEND";
-        case STATE_COOL:            return "COOL";
-        case STATE_COMPLETE:        return "COMPLETE";
-        case STATE_ERROR:           return "ERROR";
+        case STATE_IDLE:            
+            idle_entry();
+            break;
+        case STATE_HOMING:
+            homing_entry();
+            break;
+        case STATE_INITIALIZATION:
+            initialization_entry();
+            break;
+        case STATE_BEND:
+            bend_entry();
+            break;
+        case STATE_COOL:
+            cool_entry();
+            break;
+        case STATE_COMPLETE:
+            complete_entry();
+            break;
+        case STATE_ERROR:
+            error_entry();
+            break;
         default:                    return "UNKNOWN";   
     }
 }
@@ -52,4 +66,47 @@ void sm_init(void)
     g_sm.previous = STATE_IDLE;
     g_sm.error_code = ERROR_NONE;
     printk("State machine initialized. Current state: %s\n", get_state_name(g_sm.current));
+}
+
+/* State entry functions */
+void idle_entry(void)
+{
+    k_sleep(K_SECONDS(10));
+    printk("entering IDLE state \n");
+}
+
+void homing_entry(void)
+{
+    k_sleep(K_SECONDS(5));
+    printk("entering HOMING state \n");
+}
+
+void initialization_entry(void)
+{
+    k_sleep(K_SECONDS(5));
+    printk("entering INITIALIZATION state \n");
+}
+
+void bend_entry(void)
+{
+    k_sleep(K_SECONDS(5));
+    printk("entering BEND state \n");
+}
+
+void cool_entry(void)
+{
+    k_sleep(K_SECONDS(5));
+    printk("entering COOL state \n");
+}
+
+void complete_entry(void)
+{
+    k_sleep(K_SECONDS(5));
+    printk("entering COMPLETE state \n");
+}
+
+void error_entry(void)
+{
+    k_sleep(K_SECONDS(10));
+    printk("entering ERROR state \n");
 }
