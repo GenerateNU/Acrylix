@@ -118,6 +118,7 @@ void display_thread(void *p1, void *p2, void *p3)
         return;
     }
 
+    //test_display();   //use for testing display
     display_create_home_screen();
 
     display_msg_t dmsg;

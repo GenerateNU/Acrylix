@@ -89,6 +89,39 @@ int display_init(void)
 /* Creates UI screen */
 void display_create_home_screen(void)
 {
+    printk("creating bend angle input screen\n ");
+
+    /* title */
+    lv_obj_t *angle_title = lv_label_create(lv_scr_act());
+    lv_label_set_text(angle_title, "Heating... ");
+    lv_obj_align(angle_title, LV_ALIGN_TOP_MID, 0, 10);
+
+    /*angle value*/
+    lv_obj_t *temp_value = lv_label_create(lv_scr_act());
+    lv_label_set_text(temp_value, "90°C");
+    lv_obj_align(temp_value, LV_ALIGN_TOP_MID, 10, 10);
+
+    /* time remaining label */
+    lv_obj_t *time_label = lv_label_create(lv_scr_act());
+    lv_label_set_text(time_label,
+        "time remaing min:sec");
+    lv_obj_align(time_label, LV_ALIGN_BOTTOM_MID, 0, 20);
+
+    /* Progress bar*/
+    bar = lv_bar_create(lv_scr_act());
+    lv_obj_set_size(bar, 200, 20);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 30);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 100, LV_ANIM_OFF);
+
+    /* percentage label */
+    lv_obj_t *percentage_label = lv_label_create(lv_scr_act());
+    lv_label_set_text(percentage_label, "0%");
+    lv_obj_align(percentage_label, LV_ALIGN_BOTTOM_MID, 0, 50);
+}
+
+void test_display(void)
+{
     printk("create home screen\n");
     lv_obj_clean(lv_scr_act());
 
@@ -101,7 +134,7 @@ void display_create_home_screen(void)
     /* Title */
     lv_obj_t *title = lv_label_create(lv_scr_act());
     lv_label_set_text(title, "Encoder Position");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 60);
+    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
 
     /* Position number */
     position_label = lv_label_create(lv_scr_act());
@@ -125,6 +158,81 @@ void display_create_home_screen(void)
     lv_bar_set_value(bar, 100, LV_ANIM_OFF);
 }
 
+/* create direction screen */
+static void direction_screen(void)
+{
+    printk("creating directions screen\n ");
+
+    /* directions title */
+    lv_obj_t *direct_title = lv_label_create(lv_scr_act());
+    lv_label_set_text(direct_title, "Directions: ");
+    lv_obj_align(direct_title, LV_ALIGN_TOP_MID, 0, 20);
+
+    /* directions paragraph */
+    lv_obj_t *directions = lv_label_create(lv_scr_act());
+    lv_label_set_text(directions, 
+        "1. Insert acrylic on left hand side and align to desired position. "
+        "2. Clamp by turning upper clamp knob (1). "
+        "3. Manually adjust knob (2) to desired bend radius and tighten nuts to lock. "
+        "4. Hit ▶ to proceed and select inputs. "
+        "* E-stop on right side of machine for emergency");
+    lv_obj_align(directions, LV_ALIGN_TOP_MID, 0, 40);
+}
+
+/* create bend angle input screen */
+static void bend_angle_screen(void)
+{
+    /* title */
+    lv_obj_t *angle_title = lv_label_create(lv_scr_act());
+    lv_label_set_text(angle_title, "Bend Angle: ");
+    lv_obj_align(angle_title, LV_ALIGN_TOP_MID, 0, 0);
+
+    /*angle value*/
+    lv_obj_t *angle_value = lv_label_create(lv_scr_act());
+    lv_label_set_text(angle_value, "0°");
+    lv_obj_align(angle_value, LV_ALIGN_TOP_MID, 10, 10);
+
+    lv_obj_t *procced_label = lv_label_create(lv_scr_act());
+    lv_label_set_text(procced_label,
+        "Hit ▶ to proceed"
+        "Hit ◀ to return");
+    lv_obj_align(procced_label, LV_ALIGN_CENTER, 0, 0);
+}
+
+/* create idle screen */
+static void idle_screen(void)
+{
+    printk("creating initialization screen\n ");
+}
+
+/*  create bend screen*/
+static void bend_screen(void)
+{
+    printk("creating bend screen\n ");
+
+    /* bend title */
+    lv_obj_t *bend_title = lv_label_create(lv_scr_act());
+    lv_label_set_text(bend_title, "Bending...");
+    lv_obj_align(bend_title, LV_ALIGN_TOP_MID, 0, 0);
+}
+
+/* create cool screen */
+static void cool_screen(void)
+{
+    printk("creating cool screen\n ");
+
+    /* cool title */
+    lv_obj_t *cool_title = lv_label_create(lv_scr_act());
+    lv_label_set_text(cool_title, "Cooling...");
+    lv_obj_align(cool_title, LV_ALIGN_TOP_MID, 0, 0);
+}
+
+/* create complete screen */
+static void complete_screen(void)
+{
+    printk("creating complete screen\n ");
+}
+
 /* ── Update state label (called from display thread via message queue) ── */
 void display_set_state(int state)
 {
@@ -133,29 +241,25 @@ void display_set_state(int state)
 
     lv_label_set_text(state_label, get_state_name(s));
 
-    /* Change color per state */
     switch (s) {
         case STATE_IDLE:
-            lv_obj_set_style_text_color(state_label,
-                lv_color_hex(0x00FF00), LV_PART_MAIN);  // green
+            printk("idle \n");
+            //idle_screen();
             break;
         case STATE_INITIALIZATION:
-        case STATE_HOMING:
-            lv_obj_set_style_text_color(state_label,
-                lv_color_hex(0xFFFF00), LV_PART_MAIN);  // yellow
+            printk("initializing \n");
             break;
         case STATE_BEND:
+            printk("bending \n");
+            //bend_screen();
+            break;
         case STATE_COOL:
-            lv_obj_set_style_text_color(state_label,
-                lv_color_hex(0x00BFFF), LV_PART_MAIN);  // blue
+            printk("cooling \n");
+            //cool_screen();
             break;
         case STATE_COMPLETE:
-            lv_obj_set_style_text_color(state_label,
-                lv_color_hex(0x00FF00), LV_PART_MAIN);  // green
-            break;
-        case STATE_ERROR:
-            lv_obj_set_style_text_color(state_label,
-                lv_color_hex(0xFF0000), LV_PART_MAIN);  // red
+            printk("complete \n");
+            //complete_screen();
             break;
         default:
             break;
