@@ -15,11 +15,12 @@
 #include <zephyr/sys/printk.h>
 
 /* ── Device tree bindings ─────────────────────────────────────────────────── */
-#define STEP_NODE DT_ALIAS(stepper_step)
-#define DIR_NODE  DT_ALIAS(stepper_dir)
+#define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
 
-static const struct pwm_dt_spec  step_pwm = PWM_DT_SPEC_GET(STEP_NODE);
-static const struct gpio_dt_spec dir_pin  = GPIO_DT_SPEC_GET(DIR_NODE, gpios);
+static const struct pwm_dt_spec  step_pwm =
+    PWM_DT_SPEC_GET(ZEPHYR_USER_NODE);
+static const struct gpio_dt_spec dir_pin  =
+    GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, dir_gpios);
 
 /* ── Motor config ─────────────────────────────────────────────────────────── */
 #define STEPS_PER_REV  20000UL
