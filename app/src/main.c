@@ -16,10 +16,6 @@
 const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 //const struct device *enc = DEVICE_DT_GET(DT_NODELABEL(encoder));
 
-K_MSGQ_DEFINE(event_queue, sizeof(system_event_t), 8, 4);
-K_MSGQ_DEFINE(display_queue, sizeof(display_msg_t), 4, 4);
-
-
 /* ── Input callback (testing) ──────────────────────────────────────────── */
 static void any_input_cb(struct input_event *evt, void *user_data)
 {
@@ -30,9 +26,9 @@ INPUT_CALLBACK_DEFINE(NULL, any_input_cb, NULL);
 
 /* ── Thread stack sizes & priorities ───────────────────────────────────── */
 #define STATE_STACK_SIZE    2048
-#define STATE_PRIORITY      7
+#define STATE_PRIORITY      5
 
-#define DISPLAY_STACK_SIZE  4096
+#define DISPLAY_STACK_SIZE  8192
 #define DISPLAY_PRIORITY    6
 
 /*
@@ -57,54 +53,8 @@ void state_thread(void *p1, void *p2, void *p3)
 
     printk("Initial state: %s\n", get_state_name(g_sm.previous));
 
-    while (1) {
-    //add error events later
-       switch (g_sm.current) {
-            case STATE_IDLE:
-                /* add input_handler and display_handler*/
-                k_sleep(K_SECONDS(10));
-                sm_transition(STATE_INITIALIZATION);
-                /* --- use when events are needed
-                if (evt == EVT_START_INIT){
-                    sm_transition(STATE_INITIALIZATION);
-                } */
-                break;
-            case STATE_INITIALIZATION:
-                /* add homing_handler */
-                /* add temp_handler and stepper_handler */
-                k_sleep(K_SECONDS(5));
-                sm_transition(STATE_BEND);
-                break;
-            case STATE_BEND:
-                /* add bend_handler */
-                k_sleep(K_SECONDS(5));
-                sm_transition(STATE_COOL);
-                break;
-            case STATE_COOL:
-                /* add cooling_handler */
-                k_sleep(K_SECONDS(5));
-                sm_transition(STATE_COMPLETE);
-                break;
-            case STATE_COMPLETE:
-                k_sleep(K_SECONDS(5));
-                sm_transition(STATE_HOMING);
-                break;
-            case STATE_HOMING:
-                k_sleep(K_SECONDS(5));
-                sm_transition(STATE_IDLE);
-                break;
-            case STATE_ERROR:
-                k_sleep(K_SECONDS(10));
-                sm_transition(STATE_IDLE);
-                break;
-            default:
-                printk("Unknown state: %d", g_sm.current);
-                //sm_set_error(ERROR_NONE);
-                break;
-        }
-
-        k_sleep(K_MSEC(100));
-    }
+    event_post(EVT_START_IDLE);
+    sm_run();
 }
 
 /* display thread*/

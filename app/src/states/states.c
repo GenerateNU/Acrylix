@@ -1,6 +1,10 @@
 #include "states.h"
 #include <zephyr/kernel.h>
 
+/* Message queues */
+K_MSGQ_DEFINE(event_queue, sizeof(system_event_t), 10, 4);
+K_MSGQ_DEFINE(display_queue, sizeof(display_msg_t), 10, 4);
+
 /* State machine context */
 sm_ctx_t g_sm = {
     .current    = STATE_IDLE,
@@ -60,9 +64,28 @@ void sm_transition(system_state_t new_state)
     }
 }
 
+void sm_run(void)
+{
+    system_event_t evt;
+    while (1) {
+        k_msgq_get(&event_queue, &evt, K_FOREVER);
+        switch (evt) {
+            case EVT_START_IDLE:            sm_transition(STATE_IDLE);              break;
+            case EVT_START_INITIALIZATION:  sm_transition(STATE_INITIALIZATION);    break;
+            case EVT_START_BEND:            sm_transition(STATE_BEND);              break;
+            case EVT_START_COOL:            sm_transition(STATE_COOL);              break;
+            case EVT_START_COMPLETE:        sm_transition(STATE_COMPLETE);          break;
+            case EVT_START_HOMING:          sm_transition(STATE_HOMING);            break;
+            case EVT_ERROR:                 sm_transition(STATE_ERROR);             break;
+            case EVT_NONE:                  break;
+            default:                break;
+        }
+    }
+}
+
 void sm_init(void)
 {
-    g_sm.current = STATE_IDLE;
+    g_sm.current = STATE_ERROR;
     g_sm.previous = STATE_IDLE;
     g_sm.error_code = ERROR_NONE;
     printk("State machine initialized. Current state: %s\n", get_state_name(g_sm.current));
@@ -72,34 +95,62 @@ void sm_init(void)
 void idle_entry(void)
 {
     printk("entering IDLE state \n");
+    k_sleep(K_SECONDS(5));  //replace with actual code later
+
+    printk("IDLE complete \n");
+    event_post(EVT_START_INITIALIZATION);
 }
 
 void homing_entry(void)
 {
     printk("entering HOMING state \n");
+    k_sleep(K_SECONDS(5));
+
+    printk("HOMING complete \n");
+    event_post(EVT_START_IDLE);
 }
 
 void initialization_entry(void)
 {
     printk("entering INITIALIZATION state \n");
+    k_sleep(K_SECONDS(5));
+
+    printk("INITIALIZATION complete \n");
+    event_post(EVT_START_BEND);
 }
 
 void bend_entry(void)
 {
     printk("entering BEND state \n");
+    k_sleep(K_SECONDS(5));
+
+    printk("BEND complete \n");
+    event_post(EVT_START_COOL);
 }
 
 void cool_entry(void)
 {
     printk("entering COOL state \n");
+    k_sleep(K_SECONDS(5));
+
+    printk("Cool complete \n");
+    event_post(EVT_START_COMPLETE);
 }
 
 void complete_entry(void)
 {
     printk("entering COMPLETE state \n");
+    k_sleep(K_SECONDS(5));
+
+    printk("Completed \n");
+    event_post(EVT_START_IDLE);
+
 }
 
 void error_entry(void)
 {
     printk("entering ERROR state \n");
+    k_sleep(K_SECONDS(5));
+
+    event_post(EVT_START_IDLE);
 }

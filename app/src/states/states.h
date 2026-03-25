@@ -20,7 +20,7 @@ typedef enum {
     EVT_NONE = 0,
     EVT_START_IDLE,
     EVT_START_HOMING,
-    EVT_START_INIT,
+    EVT_START_INITIALIZATION,
     EVT_START_BEND,
     EVT_START_COOL,
     EVT_START_COMPLETE,
@@ -63,6 +63,15 @@ extern sm_ctx_t g_sm;
 const char* get_state_name(system_state_t state);   //get state name
 void sm_transition(system_state_t new_state);   //transition to new state
 void sm_init(void); //initialize state machine
+void sm_run(void);  //run state machine loop
+
+void idle_entry(void);
+void homing_entry(void);
+void initialization_entry(void);
+void bend_entry(void);
+void cool_entry(void);
+void complete_entry(void);
+void error_entry(void);
 
 /* Display message */
 typedef struct {
