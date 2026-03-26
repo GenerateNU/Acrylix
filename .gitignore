@@ -20,3 +20,8 @@ Release/
 # OS files
 .DS_Store
 Thumbs.db
+.venv/
+zephyr/
+modules/
+bootloader/
+*.tar.xz
