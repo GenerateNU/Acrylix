@@ -1,0 +1,2 @@
+config BOARD_ACRYLIX
+	select SOC_STM32F446XX

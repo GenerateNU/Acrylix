@@ -1,0 +1,17 @@
+identifier: acrylix
+name: Acrylix Custom PCB
+type: mcu
+arch: arm
+ram: 128
+flash: 512
+toolchain:
+  - zephyr
+  - gnuarmemb
+supported:
+  - uart
+  - gpio
+  - spi
+  - i2c
+  - adc
+  - pwm
+vendor: custom

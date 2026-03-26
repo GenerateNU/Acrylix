@@ -6,13 +6,10 @@ manifest:
   projects:
     - name: zephyr
       remote: zephyrproject-rtos
-      revision: main
+      revision: v3.7.0
       import: true
-
-    - name: lvgl
-      remote: zephyrproject-rtos
-      revision: master
-      path: modules/lib/lvgl
+      # lvgl is managed by Zephyr's own manifest via import: true above.
+      # Do not add a manual lvgl entry — it risks version conflicts.
 
   self:
     path: Acrylix.git

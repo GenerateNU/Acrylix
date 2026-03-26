@@ -1,0 +1,5 @@
+/* Intentionally empty.
+   All STM32 pinctrl definitions are provided by the SoC-level DTSI included
+   in plaitpilot_procpu.dts:
+       #include <st/f4/stm32f446r(c-e)tx-pinctrl.dtsi>
+   Peripheral pinctrl-0 assignments are made per-node in app.overlay. */

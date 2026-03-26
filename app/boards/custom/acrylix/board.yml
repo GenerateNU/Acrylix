@@ -1,0 +1,6 @@
+board:
+  name: acrylix
+  full_name: Acrylix Custom PCB
+  vendor: custom
+  socs:
+    - name: stm32f446xx
