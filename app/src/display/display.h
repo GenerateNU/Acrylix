@@ -17,6 +17,8 @@ void display_update(void);
 /* UI creation functions - add more as your project grows */
 void display_create_home_screen(void);
 void display_set_state(int state);
+//void display_update_value(const char *value);
+//void display_update_progress(int pct, int min, int sec);
 
 /*encoder */
 int encoder_get_position(void);

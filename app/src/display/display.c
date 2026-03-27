@@ -10,6 +10,11 @@
 /* ── Display device ── */
 static const struct device *display_dev;
 
+/* User input */
+static lv_obj_t *process_value_label;
+static lv_obj_t *process_time_label;
+static lv_obj_t *process_pct_label;
+
 /* ── UI elements ── */
 static lv_obj_t *position_label;
 static lv_obj_t *direction_label;
@@ -63,6 +68,9 @@ static void init_styles(void)
 static void clear_screen(void)
 {
     bar = NULL;
+    //process_value_label = NULL;
+    //process_time_label = NULL;
+    //process_pct_label = NULL;
     lv_obj_clean(lv_scr_act());
     lv_obj_add_style(lv_scr_act(), &style_screen, 0);
 }
@@ -118,6 +126,25 @@ int encoder_get_direction(void)
     k_mutex_unlock(&encoder_mutex);
     return dir;
 }
+
+/* ------ add when encoder is back value ---------- */
+ /*void display_update_value(const char *value)
+ {
+    if (process_value_label != NULL)
+        lv_label_set_text(process_value_label, value);
+}
+
+void display_update_progress(int pct, int min, int sec)
+{
+     if (bar == NULL) return;
+     char time_buf[32];
+     char pct_buf[8];
+     snprintf(time_buf, sizeof(time_buf), "time remaining %02d:%02d", min, sec);
+     snprintf(pct_buf,  sizeof(pct_buf),  "%d%%", pct);
+     lv_bar_set_value(bar, pct, LV_ANIM_ON);
+     if (process_time_label != NULL) lv_label_set_text(process_time_label, time_buf);
+     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
+}*/
 
 /* ══════════════════════════════════════════════════════════════
  *  Display init
@@ -194,18 +221,25 @@ static void process_screen(const char *header, const char *value)
     printk("display: process screen (%s)\n", header);
     clear_screen();
 
-    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_TOP_MID,  0, 10);
-    make_label(lv_scr_act(), &style_title, value,  LV_ALIGN_TOP_MID,  0, 35);
-    make_label(lv_scr_act(), &style_body,  "time remaining --:--",
-               LV_ALIGN_BOTTOM_MID, 0, -60);
+    /* Header */
+    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_CENTER,  0, -55);
 
+    /* Value (temp or angle)*/
+    make_label(lv_scr_act(), &style_title, value,  LV_ALIGN_CENTER, 0, -25);
+
+    /* Time remaining */
+    make_label(lv_scr_act(), &style_subtitle,  "time remaining --:--",
+               LV_ALIGN_CENTER, 0, 20);
+
+    /* Progress bar */
     bar = lv_bar_create(lv_scr_act());
     lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -35);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 50);
     lv_bar_set_range(bar, 0, 100);
     lv_bar_set_value(bar, 0, LV_ANIM_OFF);
 
-    make_label(lv_scr_act(), &style_body, "0%", LV_ALIGN_BOTTOM_MID, 0, -10);
+    /* Percentage label */
+    make_label(lv_scr_act(), &style_body, "0%", LV_ALIGN_CENTER, 0, 75);
 }
 
 /* SCREEN 4 — COMPLETE (STATE_COMPLETE) */

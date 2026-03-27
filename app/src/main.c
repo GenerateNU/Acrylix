@@ -62,7 +62,7 @@ void state_thread(void *p1, void *p2, void *p3)
        switch (g_sm.current) {
             case STATE_IDLE:
                 /* add input_handler and display_handler*/
-                k_sleep(K_SECONDS(30));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_INITIALIZATION);
                 /* --- use when events are needed
                 if (evt == EVT_START_INIT){
@@ -72,17 +72,17 @@ void state_thread(void *p1, void *p2, void *p3)
             case STATE_INITIALIZATION:
                 /* add homing_handler */
                 /* add temp_handler and stepper_handler */
-                k_sleep(K_SECONDS(5));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_BEND);
                 break;
             case STATE_BEND:
                 /* add bend_handler */
-                k_sleep(K_SECONDS(5));
+                k_sleep(K_SECONDS(10));
                 sm_transition(STATE_COOL);
                 break;
             case STATE_COOL:
                 /* add cooling_handler */
-                k_sleep(K_SECONDS(5));
+                k_sleep(K_SECONDS(10));
                 sm_transition(STATE_COMPLETE);
                 break;
             case STATE_COMPLETE:

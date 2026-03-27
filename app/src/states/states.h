@@ -56,6 +56,14 @@ typedef struct {
 extern struct k_msgq event_queue;
 extern struct k_msgq display_queue;
 
+/* -- User inputs -- */
+typedef struct {
+    int bend_angle;    /* degrees */
+    int thickness;     /* mm */
+    int bend_radii;    /* mm */
+} user_inputs_t;
+
+extern user_inputs_t g_inputs;
 /* ── Global state machine instance ── */
 extern sm_ctx_t g_sm;
 

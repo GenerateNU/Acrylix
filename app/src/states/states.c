@@ -14,6 +14,13 @@ sm_ctx_t g_sm = {
     .cool_complete = false,
 };
 
+/* User inputs */
+user_inputs_t g_inputs = {
+    .bend_angle = 0,
+    .thickness = 0,
+    .bend_radii = 0
+};
+
 const char* get_state_name(system_state_t state)
 {
     switch (state) {
