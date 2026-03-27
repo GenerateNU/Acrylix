@@ -1,26 +1,87 @@
+/* display.c */
 #include "display.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
-#include <zephyr/input/input.h> 
+#include <zephyr/input/input.h>
 #include <lvgl.h>
 #include <stdio.h>
 #include "../states/states.h"
 
-/* ── Display ── */
+/* ── Display device ── */
 static const struct device *display_dev;
 
-/* UI Elements*/
+/* ── UI elements ── */
 static lv_obj_t *position_label;
 static lv_obj_t *direction_label;
 static lv_obj_t *state_label;
 static lv_obj_t *bar;
 
 /* ── Encoder state ── */
-static int position = 0;
+static int position  = 0;
 static int direction = 0;
-
 static K_MUTEX_DEFINE(encoder_mutex);
 
+/* ── LVGL styles ── */
+static lv_style_t style_screen;
+static lv_style_t style_title;
+static lv_style_t style_subtitle;
+static lv_style_t style_body;
+static lv_style_t style_note;
+static bool styles_initialized = false;
+
+/* ══════════════════════════════════════════════════════════════
+ *  Internal helpers
+ * ══════════════════════════════════════════════════════════════ */
+
+static void init_styles(void)
+{
+    if (styles_initialized) return;
+
+    lv_style_init(&style_screen);
+    lv_style_set_bg_color(&style_screen, lv_color_black());
+    lv_style_set_bg_opa(&style_screen, LV_OPA_COVER);
+
+    lv_style_init(&style_title);
+    lv_style_set_text_color(&style_title, lv_color_white());
+    lv_style_set_text_font(&style_title, &lv_font_montserrat_24);
+
+    lv_style_init(&style_subtitle);
+    lv_style_set_text_color(&style_subtitle, lv_color_white());
+    lv_style_set_text_font(&style_subtitle, &lv_font_montserrat_18);
+
+    lv_style_init(&style_body);
+    lv_style_set_text_color(&style_body, lv_color_white());
+    lv_style_set_text_font(&style_body, &lv_font_montserrat_12);
+
+    lv_style_init(&style_note);
+    lv_style_set_text_color(&style_note, lv_color_hex(0xAAAAAA));
+    lv_style_set_text_font(&style_note, &lv_font_montserrat_12);
+
+    styles_initialized = true;
+}
+
+static void clear_screen(void)
+{
+    bar = NULL;
+    lv_obj_clean(lv_scr_act());
+    lv_obj_add_style(lv_scr_act(), &style_screen, 0);
+}
+
+static lv_obj_t *make_label(lv_obj_t *parent,
+                             lv_style_t *style,
+                             const char *text,
+                             lv_align_t align,
+                             lv_coord_t x_ofs,
+                             lv_coord_t y_ofs)
+{
+    lv_obj_t *lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_add_style(lbl, style, 0);
+    lv_obj_align(lbl, align, x_ofs, y_ofs);
+    return lbl;
+}
+
+/* ── Encoder input callback ── */
 static void encoder_cb(struct input_event *evt, void *user_data)
 {
     ARG_UNUSED(user_data);
@@ -35,21 +96,20 @@ static void encoder_cb(struct input_event *evt, void *user_data)
             direction = -1;
         }
         k_mutex_unlock(&encoder_mutex);
-
         printk("Encoder position: %d direction: %d\n", position, direction);
     }
 }
-
-
 INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
 
-/* Get encoder position */
+/* ══════════════════════════════════════════════════════════════
+ *  Public encoder API
+ * ══════════════════════════════════════════════════════════════ */
+
 int encoder_get_position(void)
 {
     return position;
 }
 
-/* Get encoder direction */
 int encoder_get_direction(void)
 {
     k_mutex_lock(&encoder_mutex, K_FOREVER);
@@ -59,236 +119,166 @@ int encoder_get_direction(void)
     return dir;
 }
 
-/* Initialize display */
+/* ══════════════════════════════════════════════════════════════
+ *  Display init
+ * ══════════════════════════════════════════════════════════════ */
+
 int display_init(void)
 {
-    lv_init();
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
-
     if (!device_is_ready(display_dev)) {
         printk("Display not ready\n");
         return -1;
     }
 
     display_blanking_off(display_dev);
-    printk("Display initialized\n");
 
     struct display_capabilities caps;
     display_get_capabilities(display_dev, &caps);
-    printk("Display width: %d height: %d\n", caps.x_resolution, caps.y_resolution);
+    printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
     const struct device *enc_dev = DEVICE_DT_GET(DT_NODELABEL(encoder));
-    if (!device_is_ready(enc_dev)) {
-        printk("Encoder device NOT ready!\n");
-    } else {
-        printk("Encoder device ready\n");
-    }
+    printk("Encoder %s\n", device_is_ready(enc_dev) ? "ready" : "NOT ready");
+
+    init_styles();
     return 0;
 }
 
-/* Creates UI screen */
-void display_create_home_screen(void)
+/* ══════════════════════════════════════════════════════════════
+ *  Screens — all static (internal only)
+ * ══════════════════════════════════════════════════════════════ */
+
+/* SCREEN 1 — DIRECTIONS (STATE_IDLE) */
+static void direction_screen(void)
 {
-    printk("creating bend angle input screen\n ");
+    printk("display: directions screen\n");
+    clear_screen();
 
-    /* title */
-    lv_obj_t *angle_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(angle_title, "Heating... ");
-    lv_obj_align(angle_title, LV_ALIGN_TOP_MID, 0, 10);
+    make_label(lv_scr_act(), &style_subtitle, "Directions:",
+               LV_ALIGN_TOP_LEFT, 30, 20);
 
-    /*angle value*/
-    lv_obj_t *temp_value = lv_label_create(lv_scr_act());
-    lv_label_set_text(temp_value, "90°C");
-    lv_obj_align(temp_value, LV_ALIGN_TOP_MID, 10, 10);
+    lv_obj_t *steps = lv_label_create(lv_scr_act());
+    lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(steps, lv_pct(90));
+    lv_obj_set_height(steps, LV_SIZE_CONTENT);
+    lv_label_set_text(steps,
+        "1. Insert acrylic on left hand side and align to desired position.\n\n"
+        "2. Clamp by turning upper clamp knob (1).\n\n"
+        "3. Manually adjust knob (2) to desired bend radius and tighten nuts to lock.\n\n"
+        "4. Hit  " LV_SYMBOL_PLAY " to proceed and select inputs.");
+    lv_obj_add_style(steps, &style_body, 0);
+    lv_obj_align(steps, LV_ALIGN_TOP_LEFT, 30, 48);
 
-    /* time remaining label */
-    lv_obj_t *time_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(time_label,
-        "time remaing min:sec");
-    lv_obj_align(time_label, LV_ALIGN_BOTTOM_MID, 0, 20);
-
-    /* Progress bar*/
-    bar = lv_bar_create(lv_scr_act());
-    lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, 30);
-    lv_bar_set_range(bar, 0, 100);
-    lv_bar_set_value(bar, 100, LV_ANIM_OFF);
-
-    /* percentage label */
-    lv_obj_t *percentage_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(percentage_label, "0%");
-    lv_obj_align(percentage_label, LV_ALIGN_BOTTOM_MID, 0, 50);
+    lv_obj_t *estop = lv_label_create(lv_scr_act());
+    lv_label_set_long_mode(estop, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(estop, lv_pct(100));
+    lv_label_set_text(estop,
+        "* E-stop on right side of machine for emergency");
+    lv_obj_add_style(estop, &style_note, 0);
+    lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -18);
 }
 
+/* SCREEN 2 — INPUT SELECTION (STATE_INITIALIZATION) */
+static void input_selection_screen(void)
+{
+    printk("display: input selection screen\n");
+    clear_screen();
+    make_label(lv_scr_act(), &style_title, "Input Selection",
+               LV_ALIGN_TOP_MID, 0, 10);
+    /* TODO: bend angle, thickness, bend radii inputs with encoder */
+}
+
+/* SCREEN 3 — PROCESS (STATE_BEND / STATE_COOL) */
+static void process_screen(const char *header, const char *value)
+{
+    printk("display: process screen (%s)\n", header);
+    clear_screen();
+
+    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_TOP_MID,  0, 10);
+    make_label(lv_scr_act(), &style_title, value,  LV_ALIGN_TOP_MID,  0, 35);
+    make_label(lv_scr_act(), &style_body,  "time remaining --:--",
+               LV_ALIGN_BOTTOM_MID, 0, -60);
+
+    bar = lv_bar_create(lv_scr_act());
+    lv_obj_set_size(bar, 200, 20);
+    lv_obj_align(bar, LV_ALIGN_BOTTOM_MID, 0, -35);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+
+    make_label(lv_scr_act(), &style_body, "0%", LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+/* SCREEN 4 — COMPLETE (STATE_COMPLETE) */
+static void complete_screen(void)
+{
+    printk("display: complete screen\n");
+    clear_screen();
+    make_label(lv_scr_act(), &style_title, "Done!",
+               LV_ALIGN_CENTER, 0, -10);
+    make_label(lv_scr_act(), &style_body,  "Safe to remove.",
+               LV_ALIGN_CENTER, 0, 20);
+}
+
+/* ── Testing screen ── */
 void test_display(void)
 {
-    printk("create home screen\n");
-    lv_obj_clean(lv_scr_act());
+    printk("display: test screen\n");
+    clear_screen();
 
-    state_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(state_label, "IDLE");
-    lv_obj_align(state_label, LV_ALIGN_TOP_MID, 10, 10);
-    lv_obj_set_style_text_font(state_label, &lv_font_montserrat_16, LV_PART_MAIN);
+    state_label = make_label(lv_scr_act(), &style_title, "IDLE",
+                             LV_ALIGN_TOP_MID, 10, 10);
     lv_obj_set_style_text_color(state_label, lv_color_hex(0x00FF00), LV_PART_MAIN);
 
-    /* Title */
-    lv_obj_t *title = lv_label_create(lv_scr_act());
-    lv_label_set_text(title, "Encoder Position");
-    lv_obj_align(title, LV_ALIGN_TOP_MID, 0, 0);
+    make_label(lv_scr_act(), &style_title, "Encoder Position",
+               LV_ALIGN_TOP_MID, 0, 0);
 
-    /* Position number */
-    position_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(position_label, "0");
-    lv_obj_align(position_label, LV_ALIGN_CENTER, 0, -10);
+    position_label = make_label(lv_scr_act(), &style_body, "0",
+                                LV_ALIGN_CENTER, 0, -10);
 
-    /* Direction label */
-    lv_obj_t *dir_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(dir_title, "Direction:");
-    lv_obj_align(dir_title, LV_ALIGN_BOTTOM_LEFT, 20, -10);
+    make_label(lv_scr_act(), &style_body, "Direction:",
+               LV_ALIGN_BOTTOM_LEFT, 20, -10);
+    direction_label = make_label(lv_scr_act(), &style_body, "---",
+                                 LV_ALIGN_BOTTOM_RIGHT, -20, -10);
 
-    direction_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(direction_label, "---");
-    lv_obj_align(direction_label, LV_ALIGN_BOTTOM_RIGHT, -20, -10);
-
-    /* Progress bar*/
     bar = lv_bar_create(lv_scr_act());
     lv_obj_set_size(bar, 200, 20);
     lv_obj_align(bar, LV_ALIGN_CENTER, 0, 30);
     lv_bar_set_range(bar, 0, 100);
-    lv_bar_set_value(bar, 100, LV_ANIM_OFF);
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
 }
 
-/* create direction screen */
-static void direction_screen(void)
+/* ══════════════════════════════════════════════════════════════
+ *  Public screen API
+ * ══════════════════════════════════════════════════════════════ */
+
+void display_create_home_screen(void)
 {
-    printk("creating directions screen\n ");
-
-    /* directions title */
-    lv_obj_t *direct_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(direct_title, "Directions: ");
-    lv_obj_align(direct_title, LV_ALIGN_TOP_MID, 0, 20);
-
-    /* directions paragraph */
-    lv_obj_t *directions = lv_label_create(lv_scr_act());
-    lv_label_set_text(directions, 
-        "1. Insert acrylic on left hand side and align to desired position. "
-        "2. Clamp by turning upper clamp knob (1). "
-        "3. Manually adjust knob (2) to desired bend radius and tighten nuts to lock. "
-        "4. Hit ▶ to proceed and select inputs. "
-        "* E-stop on right side of machine for emergency");
-    lv_obj_align(directions, LV_ALIGN_TOP_MID, 0, 40);
+    direction_screen();
 }
 
-/* create bend angle input screen */
-static void bend_angle_screen(void)
-{
-    /* title */
-    lv_obj_t *angle_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(angle_title, "Bend Angle: ");
-    lv_obj_align(angle_title, LV_ALIGN_TOP_MID, 0, 0);
-
-    /*angle value*/
-    lv_obj_t *angle_value = lv_label_create(lv_scr_act());
-    lv_label_set_text(angle_value, "0°");
-    lv_obj_align(angle_value, LV_ALIGN_TOP_MID, 10, 10);
-
-    lv_obj_t *procced_label = lv_label_create(lv_scr_act());
-    lv_label_set_text(procced_label,
-        "Hit ▶ to proceed"
-        "Hit ◀ to return");
-    lv_obj_align(procced_label, LV_ALIGN_CENTER, 0, 0);
-}
-
-/* create idle screen */
-static void idle_screen(void)
-{
-    printk("creating initialization screen\n ");
-}
-
-/*  create bend screen*/
-static void bend_screen(void)
-{
-    printk("creating bend screen\n ");
-
-    /* bend title */
-    lv_obj_t *bend_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(bend_title, "Bending...");
-    lv_obj_align(bend_title, LV_ALIGN_TOP_MID, 0, 0);
-}
-
-/* create cool screen */
-static void cool_screen(void)
-{
-    printk("creating cool screen\n ");
-
-    /* cool title */
-    lv_obj_t *cool_title = lv_label_create(lv_scr_act());
-    lv_label_set_text(cool_title, "Cooling...");
-    lv_obj_align(cool_title, LV_ALIGN_TOP_MID, 0, 0);
-}
-
-/* create complete screen */
-static void complete_screen(void)
-{
-    printk("creating complete screen\n ");
-}
-
-/* ── Update state label (called from display thread via message queue) ── */
 void display_set_state(int state)
 {
-    /* Cast int back to state type — safe because we control what gets sent */
-    system_state_t s = (system_state_t)state;
-
-    lv_label_set_text(state_label, get_state_name(s));
-
-    switch (s) {
-        case STATE_IDLE:
-            printk("idle \n");
-            //idle_screen();
-            break;
-        case STATE_INITIALIZATION:
-            printk("initializing \n");
-            break;
-        case STATE_BEND:
-            printk("bending \n");
-            //bend_screen();
-            break;
-        case STATE_COOL:
-            printk("cooling \n");
-            //cool_screen();
-            break;
-        case STATE_COMPLETE:
-            printk("complete \n");
-            //complete_screen();
-            break;
-        default:
-            break;
+    switch ((system_state_t)state) {
+        case STATE_IDLE:           direction_screen();                     break;
+        case STATE_INITIALIZATION: input_selection_screen();               break;
+        case STATE_BEND:           process_screen("Bending...", "15\xC2\xB0"); break;
+        case STATE_COOL:           process_screen("Cooling...", "");       break;
+        case STATE_COMPLETE:       complete_screen();                      break;
+        default: break;
     }
 }
 
-/* Updates the display */
+/* ══════════════════════════════════════════════════════════════
+ *  Periodic update — called every 10 ms from display thread
+ * ══════════════════════════════════════════════════════════════ */
+
 void display_update(void)
 {
-    /* Safely read encoder state and push to LVGL */
-    k_mutex_lock(&encoder_mutex, K_FOREVER);
-    int pos = position;
-    int dir = direction;
-    k_mutex_unlock(&encoder_mutex);
-
-    char pos_str[16];
-    snprintf(pos_str, sizeof(pos_str), "%d", pos);
-    lv_label_set_text(position_label, pos_str);
-    lv_bar_set_value(bar, pos, LV_ANIM_ON);
-
-    if (dir == 1) {
-        lv_label_set_text(direction_label, "CW  >>>");
-        lv_obj_set_style_text_color(direction_label,
-            lv_color_hex(0x00FF00), LV_PART_MAIN);
-    } else if (dir == -1) {
-        lv_label_set_text(direction_label, "<<< CCW");
-        lv_obj_set_style_text_color(direction_label,
-            lv_color_hex(0xFF4500), LV_PART_MAIN);
+    if (bar != NULL) {
+        k_mutex_lock(&encoder_mutex, K_FOREVER);
+        int pos = position;
+        k_mutex_unlock(&encoder_mutex);
+        lv_bar_set_value(bar, pos, LV_ANIM_ON);
     }
-
     lv_task_handler();
 }

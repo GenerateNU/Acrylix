@@ -62,7 +62,7 @@ void state_thread(void *p1, void *p2, void *p3)
        switch (g_sm.current) {
             case STATE_IDLE:
                 /* add input_handler and display_handler*/
-                k_sleep(K_SECONDS(10));
+                k_sleep(K_SECONDS(30));
                 sm_transition(STATE_INITIALIZATION);
                 /* --- use when events are needed
                 if (evt == EVT_START_INIT){
