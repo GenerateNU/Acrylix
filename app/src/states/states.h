@@ -54,6 +54,9 @@ typedef struct {
     bool bend_in_place;
     bool bend_complete;
     bool cool_complete;
+
+    /* Motor variables */
+    float bend_angle;
 } sm_ctx_t;
 
 /* Global state machine context */

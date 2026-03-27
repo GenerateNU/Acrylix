@@ -1,4 +1,5 @@
 #include "states.h"
+#include "../stepper/stepper.h"
 #include <zephyr/kernel.h>
 
 /* Message queues */
@@ -121,10 +122,18 @@ void initialization_entry(void)
 
 void bend_entry(void)
 {
-    printk("entering BEND state \n");
-    k_sleep(K_SECONDS(5));
+    printk("entering BEND state - angle: %.1f degrees \n", (double)g_sm.bend_angle);
 
-    printk("BEND complete \n");
+    if (stepper_init() != 0) {
+        printk("Failed to initialize stepper\n");
+        event_post(EVT_ERROR);
+        return;
+    }
+
+    stepper_move_to_degrees(g_sm.bend_angle);
+    g_sm.bend_in_place = true;
+
+    printk("Bend complete \n");
     event_post(EVT_START_COOL);
 }
 

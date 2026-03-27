@@ -13,7 +13,7 @@
 //LOG_MODULE_REGISTER(main, LOG_LEVEL_DBG);
 
 /* ── Testing hardware ──────────────────────────────────────────────────── */
-const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
+//const struct gpio_dt_spec led = GPIO_DT_SPEC_GET(DT_ALIAS(led0), gpios);
 //const struct device *enc = DEVICE_DT_GET(DT_NODELABEL(encoder));
 
 /* ── Input callback (testing) ──────────────────────────────────────────── */
@@ -26,10 +26,10 @@ INPUT_CALLBACK_DEFINE(NULL, any_input_cb, NULL);
 
 /* ── Thread stack sizes & priorities ───────────────────────────────────── */
 #define STATE_STACK_SIZE    2048
-#define STATE_PRIORITY      5
+#define STATE_PRIORITY      6
 
 #define DISPLAY_STACK_SIZE  8192
-#define DISPLAY_PRIORITY    6
+#define DISPLAY_PRIORITY    5
 
 /*
 #define TEMP_STACK_SIZE     1024
@@ -109,7 +109,7 @@ void temp_thread(void *p1, void *p2, void *p3)
 /* ── Main ──────────────────────────────────────────────────────────────── */
 int main(void)
 {
-    printk("project starting...\n");
+    printk("project starting v2...\n");
 
     /* Initialize state machine */
     sm_init();
