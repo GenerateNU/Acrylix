@@ -26,6 +26,20 @@ static int position  = 0;
 static int direction = 0;
 static K_MUTEX_DEFINE(encoder_mutex);
 
+/* ── Input selection state ── */
+typedef enum {
+    INPUT_BEND_ANGLE = 0,
+    INPUT_THICKNESS,
+    INPUT_BEND_RADII,
+    INPUT_COUNT
+} input_step_t;
+
+static input_step_t current_input_step = INPUT_BEND_ANGLE;
+static int sel_bend_angle = 0;
+static int sel_thickness  = 0;
+static int sel_bend_radii = 0;
+static lv_obj_t *input_value_label = NULL;
+
 /* ── LVGL styles ── */
 static lv_style_t style_screen;
 static lv_style_t style_title;
@@ -205,14 +219,112 @@ static void direction_screen(void)
     lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -18);
 }
 
+/* Builds one input sub-screen */
+static void input_screen(const char *title, const char *unit, int value)
+{
+    clear_screen();
+
+    /* Step indicator — "1 / 3", "2 / 3", "3 / 3" */
+    char step_buf[8];
+    snprintf(step_buf, sizeof(step_buf), "%d / %d",
+             (int)current_input_step + 1, (int)INPUT_COUNT);
+    make_label(lv_scr_act(), &style_note, step_buf,
+               LV_ALIGN_TOP_RIGHT, -10, 10);
+
+    /* Title */
+    make_label(lv_scr_act(), &style_subtitle, title,
+               LV_ALIGN_TOP_MID, 0, 15);
+
+    /* Current value — large, centered */
+    char val_buf[16];
+    snprintf(val_buf, sizeof(val_buf), "%d %s", value, unit);
+    input_value_label = make_label(lv_scr_act(), &style_title, val_buf,
+                                   LV_ALIGN_CENTER, 0, -10);
+
+    /* TODO: image/animation placeholder — add here when ready */
+
+    /* Nav hints */
+    make_label(lv_scr_act(), &style_body,
+               "Hit " LV_SYMBOL_PLAY " to proceed\n"
+               "Hit " LV_SYMBOL_STOP " to return",
+               LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+/* Shows the current input step */
+static void input_selection_show_step(void)
+{
+    switch (current_input_step) {
+        case INPUT_BEND_ANGLE: input_screen("Bend Angle", "deg", sel_bend_angle); break;
+        case INPUT_THICKNESS:  input_screen("Thickness",  "mm",  sel_thickness);  break;
+        case INPUT_BEND_RADII: input_screen("Bend Radii", "mm",  sel_bend_radii); break;
+        default: break;
+    }
+}
+
 /* SCREEN 2 — INPUT SELECTION (STATE_INITIALIZATION) */
-static void input_selection_screen(void)
+void input_selection_screen(void)
 {
     printk("display: input selection screen\n");
-    clear_screen();
-    make_label(lv_scr_act(), &style_title, "Input Selection",
-               LV_ALIGN_TOP_MID, 0, 10);
-    /* TODO: bend angle, thickness, bend radii inputs with encoder */
+    current_input_step = INPUT_BEND_ANGLE;
+    sel_bend_angle = 0;
+    sel_thickness  = 0;
+    sel_bend_radii = 0;
+    input_selection_show_step();
+}
+
+/* Advance to next input or confirm and transition */
+void input_selection_next(void)
+{
+    if (current_input_step < INPUT_COUNT - 1) {
+        current_input_step++;
+        input_selection_show_step();
+    } else {
+        g_inputs.bend_angle = sel_bend_angle;
+        g_inputs.thickness  = sel_thickness;
+        g_inputs.bend_radii = sel_bend_radii;
+        printk("Inputs confirmed: angle=%d thickness=%d radii=%d\n",
+               g_inputs.bend_angle, g_inputs.thickness, g_inputs.bend_radii);
+        sm_transition(STATE_BEND);
+    }
+}
+
+/* Go back to previous input or return to idle */
+void input_selection_prev(void)
+{
+    if (current_input_step > INPUT_BEND_ANGLE) {
+        current_input_step--;
+        input_selection_show_step();
+    } else {
+        sm_transition(STATE_IDLE);
+    }
+}
+
+/* Update current value from encoder — call from encoder_cb when in STATE_INITIALIZATION */
+void input_selection_update_value(int delta)
+{
+    switch (current_input_step) {
+        case INPUT_BEND_ANGLE:
+            sel_bend_angle = CLAMP(sel_bend_angle + delta, 0, 180);
+            break;
+        case INPUT_THICKNESS:
+            sel_thickness = CLAMP(sel_thickness + delta, 0, 50);
+            break;
+        case INPUT_BEND_RADII:
+            sel_bend_radii = CLAMP(sel_bend_radii + delta, 0, 100);
+            break;
+        default:
+            break;
+    }
+
+    if (input_value_label != NULL) {
+        char val_buf[16];
+        const char *unit = (current_input_step == INPUT_BEND_ANGLE) ? "deg" : "mm";
+        int val = (current_input_step == INPUT_BEND_ANGLE) ? sel_bend_angle :
+                  (current_input_step == INPUT_THICKNESS)  ? sel_thickness  :
+                                                             sel_bend_radii;
+        snprintf(val_buf, sizeof(val_buf), "%d %s", val, unit);
+        lv_label_set_text(input_value_label, val_buf);
+    }
 }
 
 /* SCREEN 3 — PROCESS (STATE_BEND / STATE_COOL) */

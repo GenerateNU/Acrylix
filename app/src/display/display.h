@@ -19,6 +19,9 @@ void display_create_home_screen(void);
 void display_set_state(int state);
 //void display_update_value(const char *value);
 //void display_update_progress(int pct, int min, int sec);
+void input_selection_next(void);
+void input_selection_prev(void);
+void input_selection_update_value(int delta);
 
 /*encoder */
 int encoder_get_position(void);
