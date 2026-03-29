@@ -27,4 +27,9 @@ void input_selection_update_value(int delta);
 int encoder_get_position(void);
 int encoder_get_direction(void);
 
+/* animation */
+void input_selection_next(void);
+void input_selection_prev(void);
+void input_selection_update_value(int delta);
+
 #endif /* DISPLAY_H */
