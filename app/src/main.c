@@ -72,25 +72,25 @@ void state_thread(void *p1, void *p2, void *p3)
             case STATE_INITIALIZATION:
                 /* add homing_handler */
                 /* add temp_handler and stepper_handler */
-                k_sleep(K_SECONDS(2));
+                k_sleep(K_SECONDS(15));
                 sm_transition(STATE_BEND);
                 break;
             case STATE_BEND:
                 /* add bend_handler */
-                k_sleep(K_SECONDS(10));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_COOL);
                 break;
             case STATE_COOL:
                 /* add cooling_handler */
-                k_sleep(K_SECONDS(10));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_COMPLETE);
                 break;
             case STATE_COMPLETE:
-                k_sleep(K_SECONDS(5));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_HOMING);
                 break;
             case STATE_HOMING:
-                k_sleep(K_SECONDS(5));
+                k_sleep(K_SECONDS(2));
                 sm_transition(STATE_IDLE);
                 break;
             case STATE_ERROR:

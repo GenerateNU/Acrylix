@@ -232,22 +232,22 @@ static void input_screen(const char *title, const char *unit, int value)
                LV_ALIGN_TOP_RIGHT, -10, 10);
 
     /* Title */
-    make_label(lv_scr_act(), &style_subtitle, title,
-               LV_ALIGN_TOP_MID, 0, 15);
+    make_label(lv_scr_act(), &style_title, title,
+               LV_ALIGN_CENTER, 60, -25);
 
     /* Current value — large, centered */
     char val_buf[16];
     snprintf(val_buf, sizeof(val_buf), "%d %s", value, unit);
     input_value_label = make_label(lv_scr_act(), &style_title, val_buf,
-                                   LV_ALIGN_CENTER, 0, -10);
+                                   LV_ALIGN_CENTER, 60, 5);
 
     /* TODO: image/animation placeholder — add here when ready */
 
     /* Nav hints */
-    make_label(lv_scr_act(), &style_body,
+    make_label(lv_scr_act(), &style_subtitle,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
                "Hit " LV_SYMBOL_STOP " to return",
-               LV_ALIGN_BOTTOM_MID, 0, -10);
+               LV_ALIGN_BOTTOM_MID, 0, -5);
 }
 
 /* Shows the current input step */
@@ -334,10 +334,10 @@ static void process_screen(const char *header, const char *value)
     clear_screen();
 
     /* Header */
-    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_CENTER,  0, -55);
+    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_CENTER,  0, -50);
 
     /* Value (temp or angle)*/
-    make_label(lv_scr_act(), &style_title, value,  LV_ALIGN_CENTER, 0, -25);
+    make_label(lv_scr_act(), &style_title, value,  LV_ALIGN_CENTER, 0, -15);
 
     /* Time remaining */
     make_label(lv_scr_act(), &style_subtitle,  "time remaining --:--",
