@@ -23,13 +23,12 @@ static const struct gpio_dt_spec dir_pin  =
     GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, dir_gpios);
 
 /* ── Motor config ─────────────────────────────────────────────────────────── */
-#define STEPS_PER_REV  20000UL
+#define STEPS_PER_REV  400UL
 #define TARGET_RPM     30.0f
 
 /*
  * Step period in nanoseconds:
- *   period_ns = (60 / RPM / steps_per_rev) * 1e9
- * At 30 RPM, 20000 steps/rev → 100 µs per step → 10 kHz PWM
+ * period_ns = (60 / 30 / 400) * 1e9 = 5,000,000 ns = 5 ms per step = 200 Hz
  */
 #define PERIOD_NS  ((uint32_t)((60.0f / TARGET_RPM / STEPS_PER_REV) * 1e9f))
 #define PULSE_NS   (PERIOD_NS / 2u)   /* 50% duty cycle */
