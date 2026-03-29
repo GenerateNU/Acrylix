@@ -1,0 +1,63 @@
+/dts-v1/;
+
+#include <st/f4/stm32f446Xe.dtsi>
+#include "plaitpilot_pinctrl.dtsi"
+#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/ {
+    model = "plaitpilot";
+    compatible = "custom,plaitpilot";
+
+    aliases {
+        watchdog0 = &iwdg;
+        led0 = &led0;
+        uart-0 = &usart2;
+        sw0 = &button0;
+    };
+
+    chosen {
+        zephyr,sram = &sram0;
+        zephyr,console = &usart2;
+        zephyr,shell-uart = &usart2;
+        zephyr,flash = &flash0;
+    };
+
+    buttons {
+        compatible = "gpio-keys";
+        button0: button_0 {
+            gpios = <&gpioc 13 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            label = "User Button";
+            zephyr,code = <INPUT_KEY_0>;
+        };
+    };
+
+    led {
+        compatible = "gpio-leds";
+        led0: led_0 {
+            gpios = <&gpiob 10 GPIO_ACTIVE_HIGH>;
+        };
+    };
+};
+
+&usart2 {
+    status = "okay";
+    current-speed = <115200>;
+    pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
+    pinctrl-names = "default";
+};
+
+&gpioa {
+    status = "okay";
+};
+
+&gpiob {
+    status = "okay";
+};
+
+&gpioc {
+    status = "okay";
+};
+
+&iwdg {
+    status = "okay";
+};

@@ -1,16 +1,26 @@
-#include <zephyr/dt-bindings/pinctrl/esp-pinctrl-common.h>
-#include <dt-bindings/pinctrl/esp32-pinctrl.h>
-#include <zephyr/dt-bindings/pinctrl/esp32-gpio-sigmap.h>
+#include <zephyr/dt-bindings/pinctrl/stm32-pinctrl.h>
 
 &pinctrl {
-    uart0_default: uart0_default {
-        group1 {
-            pinmux = <UART0_TX_GPIO33>;
-            output-high;
-        };
-        group2 {
-            pinmux = <UART0_RX_GPIO34>;
-            bias-pull-up;
-        };
+    usart2_tx_pa2: usart2_tx_pa2 {
+        pinmux = <STM32_PINMUX('A', 2, AF7)>;
+    };
+    usart2_rx_pa3: usart2_rx_pa3 {
+        pinmux = <STM32_PINMUX('A', 3, AF7)>;
+        bias-pull-up;
+    };
+
+    spi1_sck_pa5: spi1_sck_pa5 {
+        pinmux = <STM32_PINMUX('A', 5, AF5)>;
+        drive-push-pull;
+        slew-rate = "very-high-speed";
+    };
+    spi1_miso_pa6: spi1_miso_pa6 {
+        pinmux = <STM32_PINMUX('A', 6, AF5)>;
+        bias-pull-down;
+    };
+    spi1_mosi_pa7: spi1_mosi_pa7 {
+        pinmux = <STM32_PINMUX('A', 7, AF5)>;
+        drive-push-pull;
+        slew-rate = "very-high-speed";
     };
 };

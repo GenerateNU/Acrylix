@@ -1,9 +1,9 @@
 identifier: plaitpilot
 name: Generate Hardware PlaitPilot
 type: mcu
-arch: xtensa
-ram: 2816
-flash: 1952
+arch: arm # cpu architecture
+ram: 128
+flash: 512
 toolchain:
   - zephyr
 supported:
@@ -12,4 +12,4 @@ supported:
   - spi
   - i2c
   - usbd
-vendor: espressif
+vendor: st

@@ -5,4 +5,4 @@ board:
   vendor: custom
   # this is just names for any SoCs, not where the actual SoC selection occurs (happens in Kconfig)
   socs:
-  - name: esp32
+  - name: stm32f446xe
