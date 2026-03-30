@@ -1,9 +1,5 @@
 /dts-v1/;
 
-/* NOTE: Zephyr's board loader expects the primary DTS to be named <board>.dts
-   (i.e. acrylix.dts) when there are no SoC qualifiers in board.yml.
-   If the build fails with "no DTS file found", rename this file to acrylix.dts. */
-
 #include <st/f4/stm32f446Xe.dtsi>
 #include <st/f4/stm32f446r(c-e)tx-pinctrl.dtsi>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
@@ -13,10 +9,8 @@
     compatible = "custom,acrylix";
 
     chosen {
-        zephyr,console    = &usart2; /* VERIFY against schematic — PA2/PA3 assumed */
-        zephyr,shell-uart = &usart2;
-        zephyr,sram       = &sram0;
-        zephyr,flash      = &flash0;
+        zephyr,sram  = &sram0;
+        zephyr,flash = &flash0;
     };
 };
 
@@ -41,14 +35,3 @@
     apb1-prescaler = <4>;   /* APB1 max 45 MHz → 180/4 = 45 MHz */
     apb2-prescaler = <2>;   /* APB2 max 90 MHz → 180/2 = 90 MHz */
 };
-
-/* ── Console UART ── */
-/* VERIFY: PA2/PA3 matches NUCLEO-F446RE and many STM32F446 designs.
-   If the custom PCB routes UART elsewhere, update pinctrl-0 and the &chosen node. */
-&usart2 {
-    pinctrl-0 = <&usart2_tx_pa2 &usart2_rx_pa3>;
-    pinctrl-names = "default";
-    current-speed = <115200>;
-    status = "okay";
-};
-
