@@ -18,10 +18,9 @@ static int position = 0;
 static int direction = 0;
 
 #if 1
-static void encoder_cb(struct input_event *evt, void *user_data)
+static void encoder_cb(struct input_event *evt)
 {
-    ARG_UNUSED(user_data);
-    
+
     printk("Event type: %d code: %d value: %d\n", evt->type, evt->code, evt->value);
 
     /* Reads encoder input and changes position and direction value*/
@@ -60,7 +59,7 @@ static void encoder_cb(struct input_event *evt, void *user_data)
 }
 #endif
 
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
 /* Get encoder position */
 int encoder_get_position(void)

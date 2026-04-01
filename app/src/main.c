@@ -9,6 +9,7 @@
 
 int main(void)
 {
+    printk("project starting");
     const struct device *gpiob = DEVICE_DT_GET(DT_NODELABEL(gpiob));
 
     if (!device_is_ready(gpiob)) {
@@ -18,6 +19,7 @@ int main(void)
     gpio_pin_configure(gpiob, SMOKE_PIN, GPIO_OUTPUT_INACTIVE);
 
     while (1) {
+        printk("toggling pin");
         gpio_pin_set(gpiob, SMOKE_PIN, 1);
         k_msleep(1000);
         gpio_pin_set(gpiob, SMOKE_PIN, 0);
