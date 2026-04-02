@@ -1,22 +1,52 @@
+/*
+ * nucleo_f446re.overlay
+ *
+ * Merges: ILI9341 display (SPI1), LVGL encoder, stepper GPIOs,
+ *         motor encoder inputs (AM26LS32ACDR).
+ *
+ * DRV8452 is used in H/W interface mode:
+ *   - STEP → PB0 (TIM3_CH3 PWM)
+ *   - DIR  → PB1 (GPIO)
+ *   - ENABLE, nSLEEP hardwired high on PCB — no MCU GPIO needed
+ *   - nFAULT not connected to MCU
+ *   - M0/M1/DECAY0/DECAY1 hardwired on PCB for microstep/decay config
+ *   - No SPI needed
+ *
+ * Signal             Pin    Notes
+ * ─────────────────────────────────────────────────────────────
+ * STEP PWM           PB0    TIM3_CH3
+ * DIR GPIO           PB1
+ * ENC_A_OUT          PA0    from AM26LS32ACDR line receiver
+ * ENC_B_OUT          PA1
+ * ENC_Z_OUT          PA2
+ * Display CS         PB6    SPI1 cs-gpios index 0 (unchanged)
+ * Display DC         PB8    (unchanged)
+ * Display RESET      PB9    (unchanged)
+ * LVGL encoder A     PB3    (unchanged)
+ * LVGL encoder B     PA10   (unchanged)
+ */
+
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/display/panel.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 
 / {
     chosen {
-        zephyr,display = &ili9341;  //for display
+        zephyr,display = &ili9341;
     };
 
     aliases {
         stepper-step = &stepper_step_pin;
-        stepper-dir = &stepper_dir_pin;
+        stepper-dir  = &stepper_dir_pin;
     };
 
+    /* ── LVGL rotary encoder (UI input) ─────────────────────── */
     lvgl_encoder: lvgl_encoder {
         compatible = "zephyr,lvgl-encoder-input";
         rotation-input-code = <INPUT_REL_X>;
     };
 
+    /* ── Stepper GPIO aliases (used by motion code) ──────────── */
     stepper_step_gpio: stepper_step {
         compatible = "gpio-leds";
         stepper_step_pin: stepper_step_pin {
@@ -33,6 +63,7 @@
         };
     };
 
+    /* ── User LED ────────────────────────────────────────────── */
     leds {
         compatible = "gpio-leds";
         user_led: led_0 {
@@ -41,6 +72,7 @@
         };
     };
 
+    /* ── Rotary encoder for LVGL (PB3 + PA10) ───────────────── */
     encoder: encoder {
         compatible = "gpio-qdec";
         gpios = <&gpiob 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,
@@ -52,33 +84,60 @@
         status = "okay";
     };
 
+    /* ── MIPI DBI / ILI9341 display ─────────────────────────── */
     mipi_dbi: mipi-dbi-spi {
         compatible = "zephyr,mipi-dbi-spi";
-        dc-gpios = <&gpiob 8 GPIO_ACTIVE_HIGH>;
+        dc-gpios    = <&gpiob 8 GPIO_ACTIVE_HIGH>;
         reset-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;
-        spi-dev = <&spi1>;
+        spi-dev     = <&spi1>;
         write-only;
         #address-cells = <1>;
-        #size-cells = <0>;
+        #size-cells    = <0>;
 
         ili9341: ili9341@0 {
             compatible = "ilitek,ili9340";
             mipi-max-frequency = <25000000>;
             reg = <0>;
-            width = <320>;
+            width  = <320>;
             height = <240>;
             pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
             rotation = <90>;
-            frmctr1 = [00 1b];
-            pwctrl1 = [26 00];
-            vmctrl1 = [31 3c];
-            vmctrl2 = [c0];
+            frmctr1  = [00 1b];
+            pwctrl1  = [26 00];
+            vmctrl1  = [31 3c];
+            vmctrl2  = [c0];
             pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
             ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
         };
     };
+
+    /* ── zephyr,user: PWM + motor encoder inputs ─────────────── */
+    zephyr,user {
+        /* STEP PWM — TIM3_CH3 on PB0 */
+        pwms = <&pwm3 3 0 PWM_POLARITY_NORMAL>;
+
+        /* DIR — PB1 */
+        dir-gpios   = <&gpiob 1 GPIO_ACTIVE_HIGH>;
+
+        /* Motor encoder outputs from AM26LS32ACDR */
+        enc-a-gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;
+        enc-b-gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;
+        enc-z-gpios = <&gpioa 2 GPIO_ACTIVE_HIGH>;
+    };
 };
 
+/* ── TIM3 CH3 for STEP PWM on PB0 ───────────────────────────── */
+&timers3 {
+    status = "okay";
+
+    pwm3: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim3_ch3_pb0>;
+        pinctrl-names = "default";
+    };
+};
+
+/* ── SPI1: display only (CS = PB6) ──────────────────────────── */
 &spi1 {
     status = "okay";
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
