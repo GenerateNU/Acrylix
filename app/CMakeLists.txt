@@ -7,6 +7,9 @@ set(ZEPHYR_TOOLCHAIN_VARIANT zephyr)
 find_package(Zephyr REQUIRED HINTS $ENV{ZEPHYR_BASE})
 project(app)
 
+# this line needed to be added to allow main to find temp.h
+target_include_directories(app PRIVATE src)
+
 # this didn't work when this was called app. It must be called app because... TO-DO...
 target_sources(app PRIVATE 
 	src/main.c

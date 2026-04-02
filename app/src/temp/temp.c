@@ -3,34 +3,36 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/input/input.h> 
 #include <lvgl.h>
+#include <stdio.h>
 
-#define KP 0.5              // proportional gain
-#define KI 0.1              // integral gain
-#define TS 0.01             // sample time (0.01 seconds)
-#define MAX_OUTPUT 255
-#define MIN_OUTPUT 0
-#define INTEGRAL_MAX 500    // based on max?
+// need to decide what 100% heater power switching speed will be
+
+#define KP 0.5              // proportional gain (reaction to current error)
+#define KI 0.1              // integral gain (elimination of leftover error that persists over time)
+#define TS 0.01             // seconds per cycle
+#define MAX_OUTPUT 100      // 100% heater power
+#define MIN_OUTPUT 0        // no heater power
+#define INTEGRAL_MAX 500    
 #define INTEGRAL_MIN -500
 
-double integral_term = 0.0;
-double setpoint = 150.0;            // target value
-double process_variable = 0;      // sensor reading
+double integral_term = 0.0;         // controller "memory" set to 0
+double setpoint = 150.0;            // target temperature
+double process_variable = 100.0;    // initial temperature
 
 double update_pi_controller(double input_value) {
-    // Calculate error
-    double error = setpoint - input_value;
 
-    // Update integral term
-    integral_term += error * TS;
+    double error = setpoint - input_value; // error is distance from target
 
-    // Clamp integral
+    integral_term += error * TS; // add current error to total
+
+    // cap integral to max or min values
     if (integral_term > INTEGRAL_MAX) integral_term = INTEGRAL_MAX;
     else if (integral_term < INTEGRAL_MIN) integral_term = INTEGRAL_MIN;
 
-    // Calculate output
-    double output = (KP * error) + (KI * integral_term);
+    double output = (KP * error) + (KI * integral_term); // PI formula
+    // this is the value that the MCU will receive to turn high/low the pin to the SSR
 
-    // Clamp output to maintain minimum or maximum value
+    // cap heater output
     if (output > MAX_OUTPUT) output = MAX_OUTPUT;
     else if (output < MIN_OUTPUT) output = MIN_OUTPUT;
 
@@ -38,24 +40,28 @@ double update_pi_controller(double input_value) {
 }
 
 int test_main() {
-    // Example usage in a main loop 
-    
-    for (int cycle = 0; cycle < 1000; cycle++) {
-        // In a real system, 'process_variable' would come from a sensor (e.g., ADC)
-        // We simulate a simple response here for demonstration
+    printf("Cycle  |  Temp (PV)  |  Output\n");
+    printf("-------|-------------|--------\n");
+
+    for (int cycle = 0; cycle < 2000; cycle++) {
         double control = update_pi_controller(process_variable);
-        
-        process_variable += (control - process_variable) * 0.05;
-        printk("Cycle %d, PV: %.2f, Output: %.2f\n", cycle, process_variable, control);
 
-        // The update_pi_controller function is the 'PI loop' logic called on each cycle
-        // The output of this function would control an actuator (e.g., PWM signal)
+        // Simulated plant response: moves PV toward the control output
+        //process_variable += (control - process_variable) * 0.05;
+        // ^^ that line forces the process_variable to 83.33
 
-        // Add print statements for debugging/monitoring
-        // printf("Cycle %d, PV: %.2f, Output: %.2f\n", cycle, process_variable, update_pi_controller(process_variable));
+        process_variable += (control / MAX_OUTPUT) * (setpoint - process_variable) * 0.05;
+        // control / MAX_OUTPUT: normalize value between 0-1
+        // setpoint - process_variable: difference between current and expected
+        // 0.05: scaling response time of system
+
+        // Print every 50 cycles to reduce noise
+        if (cycle % 50 == 0) {
+            printf("%6d | %11.4f | %7.4f\n", cycle, process_variable, control);
+        }
     }
+
+    printk("Completed.");
 
     return 0;
 }
-
-// Integral term eliminates error by summing the error over time
