@@ -4,14 +4,23 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/input/input.h>
 #include <lvgl.h>
+#include <lvgl_zephyr.h>
 #include <stdio.h>
 #include "../states/states.h"
 
-/* Pivot sits left-center of the animation area */
+/* ── Bend animation geometry ── */
 #define ANIM_PIVOT_X   80
 #define ANIM_PIVOT_Y   150
 #define ANIM_BAR_LEN   60
-#define ANIM_LAYER_GAP 6    /* px offset between bottom (wood) and top (acrylic) layers */
+#define ANIM_LAYER_GAP 6
+
+/* ── Thickness animation geometry ── */
+#define THICK_X          20
+#define THICK_BAR_LEN    130
+#define THICK_BOT_Y      155
+#define THICK_LAYER_GAP  5
+#define THICK_MIN_GAP    8
+#define THICK_MAX_GAP    24
 
 /* ── Display device ── */
 static const struct device *display_dev;
@@ -27,22 +36,29 @@ static lv_obj_t *direction_label;
 static lv_obj_t *state_label;
 static lv_obj_t *bar;
 
-/* ── Animation elements ──
- * Each bar has two layers: bottom (wood/grey) and top (acrylic/white).
- * fixed  = right-extending bar  (wood bottom + acrylic top)
- * moving = left-extending bar   (wood bottom + acrylic top, rotates up)
- */
-static lv_obj_t            *anim_fixed_bot;       /* grey  layer, fixed bar  */
-static lv_obj_t            *anim_fixed_top;       /* white layer, fixed bar  */
-static lv_obj_t            *anim_moving_bot;      /* grey  layer, moving bar */
-static lv_obj_t            *anim_moving_top;      /* white layer, moving bar */
-static lv_obj_t            *anim_value_label;
-static lv_point_precise_t   anim_fixed_bot_pts[2];
-static lv_point_precise_t   anim_fixed_top_pts[2];
-static lv_point_precise_t   anim_moving_bot_pts[2];
-static lv_point_precise_t   anim_moving_top_pts[2];
-static int                  auto_angle = 0;
-static int                  auto_dir   = 1;
+/* ── Bend animation elements ── */
+static lv_obj_t           *anim_fixed_bot;
+static lv_obj_t           *anim_fixed_top;
+static lv_obj_t           *anim_moving_bot;
+static lv_obj_t           *anim_moving_top;
+static lv_obj_t           *anim_value_label;
+static lv_point_precise_t  anim_fixed_bot_pts[2];
+static lv_point_precise_t  anim_fixed_top_pts[2];
+static lv_point_precise_t  anim_moving_bot_pts[2];
+static lv_point_precise_t  anim_moving_top_pts[2];
+static int                 auto_angle = 0;
+static int                 auto_dir   = 1;
+
+/* ── Thickness animation elements ── */
+static lv_obj_t           *thick_wood_bot;
+static lv_obj_t           *thick_wood_top;
+static lv_obj_t           *thick_acrylic_bot;
+static lv_obj_t           *thick_acrylic_top;
+static lv_obj_t           *thick_value_label;
+static lv_point_precise_t  thick_wood_bot_pts[2];
+static lv_point_precise_t  thick_wood_top_pts[2];
+static lv_point_precise_t  thick_acrylic_bot_pts[2];
+static lv_point_precise_t  thick_acrylic_top_pts[2];
 
 /* ── Input selection state ── */
 typedef enum {
@@ -69,8 +85,8 @@ static lv_style_t style_title;
 static lv_style_t style_subtitle;
 static lv_style_t style_body;
 static lv_style_t style_note;
-static lv_style_t style_line_acrylic;   /* white top layer  */
-static lv_style_t style_line_wood;      /* grey  bot layer  */
+static lv_style_t style_line_acrylic;
+static lv_style_t style_line_wood;
 static bool styles_initialized = false;
 static bool line_styles_init   = false;
 
@@ -115,6 +131,15 @@ static void bend_angle_input_screen_exit(void)
     anim_value_label = NULL;
 }
 
+static void thick_anim_clear(void)
+{
+    thick_wood_bot    = NULL;
+    thick_wood_top    = NULL;
+    thick_acrylic_bot = NULL;
+    thick_acrylic_top = NULL;
+    thick_value_label = NULL;
+}
+
 /* ══════════════════════════════════════════════════════════════
  *  Internal helpers
  * ══════════════════════════════════════════════════════════════ */
@@ -150,13 +175,11 @@ static void init_line_styles(void)
 {
     if (line_styles_init) return;
 
-    /* Bottom layer — grey wood */
     lv_style_init(&style_line_wood);
     lv_style_set_line_color(&style_line_wood, lv_color_hex(0x888888));
     lv_style_set_line_width(&style_line_wood, 8);
     lv_style_set_line_rounded(&style_line_wood, true);
 
-    /* Top layer — white acrylic, slightly thinner so grey peeks below */
     lv_style_init(&style_line_acrylic);
     lv_style_set_line_color(&style_line_acrylic, lv_color_white());
     lv_style_set_line_width(&style_line_acrylic, 4);
@@ -168,6 +191,7 @@ static void init_line_styles(void)
 static void clear_screen(void)
 {
     bend_angle_input_screen_exit();
+    thick_anim_clear();
     bar                 = NULL;
     input_value_label   = NULL;
     process_value_label = NULL;
@@ -237,8 +261,6 @@ static void bend_anim_set_angle(int angle_deg)
     int dx = (ANIM_BAR_LEN * COS_LUT(angle_deg)) / 1000;
     int dy = (ANIM_BAR_LEN * sin_lut[angle_deg]) / 1000;
 
-    /* Fixed bar — always horizontal, extends RIGHT from pivot
-     * bottom layer sits below top layer by ANIM_LAYER_GAP px */
     anim_fixed_bot_pts[0].x = ANIM_PIVOT_X;
     anim_fixed_bot_pts[0].y = ANIM_PIVOT_Y + ANIM_LAYER_GAP;
     anim_fixed_bot_pts[1].x = ANIM_PIVOT_X + ANIM_BAR_LEN;
@@ -249,9 +271,6 @@ static void bend_anim_set_angle(int angle_deg)
     anim_fixed_top_pts[1].x = ANIM_PIVOT_X + ANIM_BAR_LEN;
     anim_fixed_top_pts[1].y = ANIM_PIVOT_Y;
 
-    /* Moving bar — extends LEFT from pivot, rotates UP
-     * perpendicular offset for the two layers uses the bar's normal vector:
-     *   normal to (dx, -dy) is (dy, dx) — shift bottom layer along normal */
     int nx = (ANIM_LAYER_GAP * sin_lut[angle_deg]) / 1000;
     int ny = (ANIM_LAYER_GAP * COS_LUT(angle_deg)) / 1000;
 
@@ -270,8 +289,6 @@ static void bend_anim_set_angle(int angle_deg)
     if (anim_moving_bot != NULL) lv_line_set_points(anim_moving_bot, anim_moving_bot_pts, 2);
     if (anim_moving_top != NULL) lv_line_set_points(anim_moving_top, anim_moving_top_pts, 2);
 
-    /* Display angle = 180 - internal angle
-     * (internal 0 = flat/180°, internal 90 = L-shape/90°) */
     if (anim_value_label != NULL) {
         char buf[16];
         snprintf(buf, sizeof(buf), "%d deg", 180 - angle_deg);
@@ -283,12 +300,10 @@ static void bend_anim_create(lv_obj_t *parent)
 {
     init_line_styles();
 
-    /* Fixed bar — draw bottom (grey) first, then top (white) over it */
     anim_fixed_bot_pts[0].x = ANIM_PIVOT_X;
     anim_fixed_bot_pts[0].y = ANIM_PIVOT_Y + ANIM_LAYER_GAP;
     anim_fixed_bot_pts[1].x = ANIM_PIVOT_X + ANIM_BAR_LEN;
     anim_fixed_bot_pts[1].y = ANIM_PIVOT_Y + ANIM_LAYER_GAP;
-
     anim_fixed_bot = lv_line_create(parent);
     lv_line_set_points(anim_fixed_bot, anim_fixed_bot_pts, 2);
     lv_obj_add_style(anim_fixed_bot, &style_line_wood, 0);
@@ -297,17 +312,14 @@ static void bend_anim_create(lv_obj_t *parent)
     anim_fixed_top_pts[0].y = ANIM_PIVOT_Y;
     anim_fixed_top_pts[1].x = ANIM_PIVOT_X + ANIM_BAR_LEN;
     anim_fixed_top_pts[1].y = ANIM_PIVOT_Y;
-
     anim_fixed_top = lv_line_create(parent);
     lv_line_set_points(anim_fixed_top, anim_fixed_top_pts, 2);
     lv_obj_add_style(anim_fixed_top, &style_line_acrylic, 0);
 
-    /* Moving bar — starts flat (pointing left), draw bottom then top */
     anim_moving_bot_pts[0].x = ANIM_PIVOT_X;
     anim_moving_bot_pts[0].y = ANIM_PIVOT_Y + ANIM_LAYER_GAP;
     anim_moving_bot_pts[1].x = ANIM_PIVOT_X - ANIM_BAR_LEN;
     anim_moving_bot_pts[1].y = ANIM_PIVOT_Y + ANIM_LAYER_GAP;
-
     anim_moving_bot = lv_line_create(parent);
     lv_line_set_points(anim_moving_bot, anim_moving_bot_pts, 2);
     lv_obj_add_style(anim_moving_bot, &style_line_wood, 0);
@@ -316,16 +328,105 @@ static void bend_anim_create(lv_obj_t *parent)
     anim_moving_top_pts[0].y = ANIM_PIVOT_Y;
     anim_moving_top_pts[1].x = ANIM_PIVOT_X - ANIM_BAR_LEN;
     anim_moving_top_pts[1].y = ANIM_PIVOT_Y;
-
     anim_moving_top = lv_line_create(parent);
     lv_line_set_points(anim_moving_top, anim_moving_top_pts, 2);
     lv_obj_add_style(anim_moving_top, &style_line_acrylic, 0);
 
-    /* Value label — right side */
     anim_value_label = lv_label_create(parent);
     lv_label_set_text(anim_value_label, "180 deg");
     lv_obj_add_style(anim_value_label, &style_title, 0);
     lv_obj_align(anim_value_label, LV_ALIGN_CENTER, 60, 20);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  Thickness animation
+ * ══════════════════════════════════════════════════════════════ */
+
+static void thick_anim_set(int thickness_mm)
+{
+    /* Map 0–50mm to THICK_MIN_GAP–THICK_MAX_GAP px */
+    int gap      = THICK_MIN_GAP + (thickness_mm * (THICK_MAX_GAP - THICK_MIN_GAP)) / 50;
+    int acrylic_y = THICK_BOT_Y - gap - THICK_LAYER_GAP;
+
+    /* Bottom bar (wood) — fixed */
+    thick_wood_bot_pts[0].x = THICK_X;
+    thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
+    thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_wood_bot_pts[1].y = THICK_BOT_Y + THICK_LAYER_GAP;
+
+    thick_wood_top_pts[0].x = THICK_X;
+    thick_wood_top_pts[0].y = THICK_BOT_Y;
+    thick_wood_top_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_wood_top_pts[1].y = THICK_BOT_Y;
+
+    /* Top bar (acrylic) — moves up as thickness increases */
+    thick_acrylic_bot_pts[0].x = THICK_X;
+    thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
+    thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_acrylic_bot_pts[1].y = acrylic_y + THICK_LAYER_GAP;
+
+    thick_acrylic_top_pts[0].x = THICK_X;
+    thick_acrylic_top_pts[0].y = acrylic_y;
+    thick_acrylic_top_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_acrylic_top_pts[1].y = acrylic_y;
+
+    if (thick_wood_bot    != NULL) lv_line_set_points(thick_wood_bot,    thick_wood_bot_pts,    2);
+    if (thick_wood_top    != NULL) lv_line_set_points(thick_wood_top,    thick_wood_top_pts,    2);
+    if (thick_acrylic_bot != NULL) lv_line_set_points(thick_acrylic_bot, thick_acrylic_bot_pts, 2);
+    if (thick_acrylic_top != NULL) lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
+
+    if (thick_value_label != NULL) {
+        char buf[16];
+        snprintf(buf, sizeof(buf), "%d mm", thickness_mm);
+        lv_label_set_text(thick_value_label, buf);
+    }
+}
+
+static void thick_anim_create(lv_obj_t *parent)
+{
+    init_line_styles();
+
+    int acrylic_y = THICK_BOT_Y - THICK_MIN_GAP - THICK_LAYER_GAP;
+
+    /* Bottom bar — grey then white */
+    thick_wood_bot_pts[0].x = THICK_X;
+    thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
+    thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_wood_bot_pts[1].y = THICK_BOT_Y + THICK_LAYER_GAP;
+    thick_wood_bot = lv_line_create(parent);
+    lv_line_set_points(thick_wood_bot, thick_wood_bot_pts, 2);
+    lv_obj_add_style(thick_wood_bot, &style_line_wood, 0);
+
+    thick_wood_top_pts[0].x = THICK_X;
+    thick_wood_top_pts[0].y = THICK_BOT_Y;
+    thick_wood_top_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_wood_top_pts[1].y = THICK_BOT_Y;
+    thick_wood_top = lv_line_create(parent);
+    lv_line_set_points(thick_wood_top, thick_wood_top_pts, 2);
+    lv_obj_add_style(thick_wood_top, &style_line_acrylic, 0);
+
+    /* Top bar (acrylic) — grey then white, starts at min gap */
+    thick_acrylic_bot_pts[0].x = THICK_X;
+    thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
+    thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_acrylic_bot_pts[1].y = acrylic_y + THICK_LAYER_GAP;
+    thick_acrylic_bot = lv_line_create(parent);
+    lv_line_set_points(thick_acrylic_bot, thick_acrylic_bot_pts, 2);
+    lv_obj_add_style(thick_acrylic_bot, &style_line_wood, 0);
+
+    thick_acrylic_top_pts[0].x = THICK_X;
+    thick_acrylic_top_pts[0].y = acrylic_y;
+    thick_acrylic_top_pts[1].x = THICK_X + THICK_BAR_LEN;
+    thick_acrylic_top_pts[1].y = acrylic_y;
+    thick_acrylic_top = lv_line_create(parent);
+    lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
+    lv_obj_add_style(thick_acrylic_top, &style_line_acrylic, 0);
+
+    /* Value label — right side */
+    thick_value_label = lv_label_create(parent);
+    lv_label_set_text(thick_value_label, "0 mm");
+    lv_obj_add_style(thick_value_label, &style_title, 0);
+    lv_obj_align(thick_value_label, LV_ALIGN_RIGHT_MID, -10, 0);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -334,6 +435,8 @@ static void bend_anim_create(lv_obj_t *parent)
 
 int display_init(void)
 {
+    lvgl_init();
+
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
     if (!device_is_ready(display_dev)) {
         printk("Display not ready\n");
@@ -375,7 +478,7 @@ static void direction_screen(void)
         "3. Manually adjust knob (2) to desired bend radius and tighten nuts to lock.\n\n"
         "4. Hit " LV_SYMBOL_PLAY " to proceed and select inputs.");
     lv_obj_add_style(steps, &style_body, 0);
-    lv_obj_align(steps, LV_ALIGN_TOP_LEFT, 30, 48);
+    lv_obj_align(steps, LV_ALIGN_TOP_LEFT, 30, 35);
 
     lv_obj_t *estop = lv_label_create(lv_scr_act());
     lv_label_set_long_mode(estop, LV_LABEL_LONG_WRAP);
@@ -403,18 +506,39 @@ static void bend_angle_input_screen(void)
     make_label(lv_scr_act(), &style_body,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
                "Hit " LV_SYMBOL_STOP " to return",
-               LV_ALIGN_BOTTOM_MID, 60, 5);
+               LV_ALIGN_BOTTOM_MID, 0, -10);
 
     /* TODO: when encoder is ready, remove timer and instead call:
      *   input_selection_update_value(delta) from encoder_cb
-     *   bend_anim_set_angle(sel_bend_angle)
+     *   bend_anim_set_angle(90 - sel_bend_angle)
      */
     auto_angle = 0;
     auto_dir   = 1;
     k_timer_start(&bend_anim_timer, K_SECONDS(1), K_SECONDS(1));
 }
 
-/* Generic input sub-screen (thickness, bend radii) */
+/* Thickness sub-screen with animation */
+static void thickness_input_screen(void)
+{
+    clear_screen();
+
+    make_label(lv_scr_act(), &style_note, "2 / 3",
+               LV_ALIGN_TOP_RIGHT, -10, 10);
+    make_label(lv_scr_act(), &style_title, "Thickness",
+               LV_ALIGN_TOP_MID, 0, 15);
+
+    thick_anim_create(lv_scr_act());
+
+    /* input_value_label wired up so encoder updates work */
+    input_value_label = thick_value_label;
+
+    make_label(lv_scr_act(), &style_body,
+               "Hit " LV_SYMBOL_PLAY " to proceed\n"
+               "Hit " LV_SYMBOL_STOP " to return",
+               LV_ALIGN_BOTTOM_MID, 0, -10);
+}
+
+/* Generic input sub-screen (bend radii) */
 static void input_screen(const char *title, const char *unit, int value)
 {
     clear_screen();
@@ -438,7 +562,7 @@ static void input_screen(const char *title, const char *unit, int value)
     make_label(lv_scr_act(), &style_subtitle,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
                "Hit " LV_SYMBOL_STOP " to return",
-               LV_ALIGN_BOTTOM_MID, 0, -5);
+               LV_ALIGN_BOTTOM_MID, 0, -10);
 }
 
 static void input_selection_show_step(void)
@@ -446,7 +570,7 @@ static void input_selection_show_step(void)
     bend_angle_input_screen_exit();
     switch (current_input_step) {
         case INPUT_BEND_ANGLE: bend_angle_input_screen();                         break;
-        case INPUT_THICKNESS:  input_screen("Thickness",  "mm", sel_thickness);   break;
+        case INPUT_THICKNESS:  thickness_input_screen();                          break;
         case INPUT_BEND_RADII: input_screen("Bend Radii", "mm", sel_bend_radii);  break;
         default: break;
     }
@@ -492,10 +616,11 @@ void input_selection_update_value(int delta)
     switch (current_input_step) {
         case INPUT_BEND_ANGLE:
             sel_bend_angle = CLAMP(sel_bend_angle + delta, 0, 90);
-            /* TODO: also call bend_anim_set_angle(90 - sel_bend_angle) here */
+            /* TODO: call bend_anim_set_angle(90 - sel_bend_angle) here */
             break;
         case INPUT_THICKNESS:
             sel_thickness = CLAMP(sel_thickness + delta, 0, 50);
+            thick_anim_set(sel_thickness);   /* live update animation */
             break;
         case INPUT_BEND_RADII:
             sel_bend_radii = CLAMP(sel_bend_radii + delta, 0, 100);
