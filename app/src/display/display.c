@@ -16,8 +16,10 @@ static int position = 0;
 static int direction = 0;
 
 #if 1
-static void encoder_cb(struct input_event *evt)
+static void encoder_cb(struct input_event *evt, void *user_data)
 {
+    ARG_UNUSED(user_data);
+
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
         if (evt->value > 0) {
             position++;

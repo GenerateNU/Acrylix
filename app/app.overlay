@@ -1,14 +1,11 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 
-/* Minimal overlay for smoke test — display/SPI/encoder disabled until MCU is confirmed running */
-
-/* Use internal HSI (16 MHz) instead of HSE — avoids hanging if ST-LINK MCO is not running */
+/* Use internal HSI — no external crystal on PCB */
 &clk_hse {
     status = "disabled";
 };
 
 &pll {
-    /* Switch PLL input from HSE to HSI */
     clocks = <&clk_hsi>;
     div-m = <16>;
     mul-n = <192>;
@@ -18,6 +15,10 @@
 };
 
 / {
+    chosen {
+        zephyr,display = &ili9341;
+    };
+
     aliases {
         led0 = &user_led;
     };
@@ -31,6 +32,47 @@
     };
 };
 
+&gpioa {
+    status = "okay";
+};
+
 &gpiob {
     status = "okay";
+};
+
+&gpioc {
+    status = "okay";
+};
+
+&spi1 {
+    status = "okay";
+    pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
+    pinctrl-names = "default";
+    cs-gpios = <&gpioa 4 GPIO_ACTIVE_LOW>;
+
+    mipi_dbi: mipi-dbi-spi {
+        compatible = "zephyr,mipi-dbi-spi";
+        dc-gpios    = <&gpioc 6 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpioc 7 GPIO_ACTIVE_LOW>;
+        spi-dev = <&spi1>;
+        write-only;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        ili9341: ili9341@0 {
+            compatible = "ilitek,ili9340";
+            mipi-max-frequency = <25000000>;
+            reg = <0>;
+            width = <320>;
+            height = <240>;
+            pixel-format = <0>; /* 0=RGB565 */
+            rotation = <90>;
+            frmctr1 = [00 1b];
+            pwctrl1 = [26 00];
+            vmctrl1 = [31 3c];
+            vmctrl2 = [c0];
+            pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
+            ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
+        };
+    };
 };
