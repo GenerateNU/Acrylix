@@ -1,86 +1,36 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/display/panel.h>
-#include <zephyr/dt-bindings/input/input-event-codes.h>
+
+/* Minimal overlay for smoke test — display/SPI/encoder disabled until MCU is confirmed running */
+
+/* Use internal HSI (16 MHz) instead of HSE — avoids hanging if ST-LINK MCO is not running */
+&clk_hse {
+    status = "disabled";
+};
+
+&pll {
+    /* Switch PLL input from HSE to HSI */
+    clocks = <&clk_hsi>;
+    div-m = <16>;
+    mul-n = <192>;
+    div-p = <2>;
+    div-q = <4>;
+    status = "okay";
+};
 
 / {
-    chosen {
-        zephyr,display = &ili9341;
-    };
-
     aliases {
-        stepper-step = &stepper_step_gpio;
-        stepper-dir  = &stepper_dir_gpio;
-        led0         = &user_led;
-    };
-
-    lvgl_encoder: lvgl_encoder {
-        compatible = "zephyr,lvgl-encoder-input";
-        rotation-input-code = <INPUT_REL_X>;
-    };
-
-    stepper_step_gpio: stepper_step {
-        compatible = "gpio-leds";
-        gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    /* VERIFY pin against schematic */
-    };
-
-    stepper_dir_gpio: stepper_dir {
-        compatible = "gpio-leds";
-        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    /* VERIFY pin against schematic */
+        led0 = &user_led;
     };
 
     leds {
         compatible = "gpio-leds";
         user_led: led_0 {
-            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>; /* VERIFY pin against schematic */
+            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>;
             label = "User LED";
-        };
-    };
-
-    encoder: encoder {
-        compatible = "gpio-qdec";
-        gpios = <&gpiob 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,
-                <&gpioa 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
-        zephyr,axis = <INPUT_REL_X>;
-        steps-per-period = <4>;
-        sample-time-us = <2000>;
-        idle-timeout-ms = <200>;
-        status = "okay";
-    };
-
-    mipi_dbi: mipi-dbi-spi {
-        compatible = "zephyr,mipi-dbi-spi";
-        dc-gpios    = <&gpiob 8 GPIO_ACTIVE_HIGH>;  /* VERIFY against schematic */
-        reset-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;   /* VERIFY against schematic */
-        spi-dev = <&spi1>;
-        write-only;
-        #address-cells = <1>;
-        #size-cells = <0>;
-
-        ili9341: ili9341@0 {
-            compatible = "ilitek,ili9340";
-            mipi-max-frequency = <25000000>;
-            reg = <0>;
-            width = <320>;
-            height = <240>;
-            pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
-            rotation = <90>;
-            frmctr1 = [00 1b];
-            pwctrl1 = [26 00];
-            vmctrl1 = [31 3c];
-            vmctrl2 = [c0];
-            pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
-            ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
         };
     };
 };
 
 &gpiob {
     status = "okay";
-};
-
-&spi1 {
-    status = "okay";
-    pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
-    pinctrl-names = "default";
-    cs-gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;  /* VERIFY CS pin against schematic */
 };
