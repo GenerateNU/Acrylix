@@ -25,7 +25,7 @@ int main(void)
         printk("display_init failed: %d\n", ret);
     } else {
         printk("display initialized, creating home screen\n");
-        display_create_home_screen();
+        direction_screen();
         printk("home screen created\n");
     }
 
