@@ -128,10 +128,10 @@ static void init_styles(void)
 
     lv_style_init(&style_body);
     lv_style_set_text_color(&style_body, lv_color_white());
-    lv_style_set_text_font(&style_body, &lv_font_montserrat_12);
+    lv_style_set_text_font(&style_body, &lv_font_montserrat_14);
 
     lv_style_init(&style_note);
-    lv_style_set_text_color(&style_note, lv_color_hex(0xAAAAAA));
+    lv_style_set_text_color(&style_note, lv_color_white());
     lv_style_set_text_font(&style_note, &lv_font_montserrat_12);
 
     styles_initialized = true;
@@ -181,31 +181,38 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 /* ── Input callback (encoder + buttons) ── */
 static void encoder_cb(struct input_event *evt)
 {
-    /* Forward button (PA8) — pressed only */
-    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER && evt->value == 1) {
-        printk("Button: forward\n");
-        input_selection_next();
+    printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
+
+    /* Forward button (PA8) */
+    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER) {
+        if (evt->value == 1) {
+            printk("Button: forward pressed\n");
+            input_selection_next();
+        }
         return;
     }
 
-    /* Backward button (PA9) — pressed only */
-    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC && evt->value == 1) {
-        printk("Button: backward\n");
-        input_selection_prev();
+    /* Backward button (PA9) */
+    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC) {
+        if (evt->value == 1) {
+            printk("Button: backward pressed\n");
+            input_selection_prev();
+        }
         return;
     }
 
     /* Rotary encoder */
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
         int delta = (evt->value > 0) ? 1 : -1;
+        const char *dir_str = (delta > 0) ? "CW" : "CCW";
 
-        /* If bend angle screen animation */
         if (anim_fixed_bot != NULL) {
+            /* Bend angle screen — encoder controls angle */
             sel_bend_angle += delta;
             if (sel_bend_angle < 0)  sel_bend_angle = 0;
             if (sel_bend_angle > 90) sel_bend_angle = 90;
             bend_anim_set_angle(sel_bend_angle);
-            printk("Bend angle: %d deg\n", sel_bend_angle);
+            printk("Encoder: %s — bend angle %d deg\n", dir_str, sel_bend_angle);
             return;
         }
 
@@ -213,7 +220,7 @@ static void encoder_cb(struct input_event *evt)
         position += delta;
         direction = delta;
         k_mutex_unlock(&encoder_mutex);
-        printk("Encoder position: %d direction: %d\n", position, direction);
+        printk("Encoder: %s — position %d\n", dir_str, position);
     }
 }
 INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
@@ -416,9 +423,21 @@ int display_init(void)
     display_get_capabilities(display_dev, &caps);
     printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
-    /* intialize encoder */
+    /* encoder */
     const struct device *enc_dev = DEVICE_DT_GET(DT_NODELABEL(encoder));
-    printk("Encoder %s\n", device_is_ready(enc_dev) ? "ready" : "NOT ready");
+    if (device_is_ready(enc_dev)) {
+        printk("Encoder: ready (PA0=A, PA1=B)\n");
+    } else {
+        printk("Encoder: NOT ready — check overlay gpio-qdec node\n");
+    }
+
+    /* buttons */
+    const struct device *btn_dev = DEVICE_DT_GET(DT_NODELABEL(buttons));
+    if (device_is_ready(btn_dev)) {
+        printk("Buttons: ready (PA8=forward, PA9=backward)\n");
+    } else {
+        printk("Buttons: NOT ready — check overlay gpio-keys node\n");
+    }
 
     init_styles();
     return 0;
@@ -470,7 +489,7 @@ void bend_angle_input_screen(void)
     make_label(lv_scr_act(), &style_body,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
                "Hit " LV_SYMBOL_STOP " to return",
-               LV_ALIGN_BOTTOM_MID, 0, -10);
+               LV_ALIGN_BOTTOM_MID, 0, -15);
 
     sel_bend_angle = 0;
     bend_anim_set_angle(0);
