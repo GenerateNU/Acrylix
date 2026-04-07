@@ -14,9 +14,10 @@ int display_init(void);
 /* Call this in your main loop every 10ms */
 void display_update(void);
 
-/* UI creation functions - add more as your project grows */
+/* UI creation functions */
 void display_create_home_screen(void);
 void direction_screen(void);
+void bend_angle_input_screen(void);
 
 /*encoder */
 int encoder_get_position(void);
