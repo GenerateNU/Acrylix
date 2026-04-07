@@ -1,6 +1,7 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/display/panel.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
 
 / {
     chosen {
@@ -47,6 +48,26 @@
         status = "okay";
     };
 
+    /*
+     * Stepper motor resources for stepper.c (DRV8452, hardware interface mode)
+     *
+     * LQFP64 pin 26 = PB0 → STEP (TIM3_CH3 PWM output)
+     * LQFP64 pin 27 = PB1 → DIR  (GPIO output)
+     *
+     * WARNING — step-gpios (feedback for interrupt counting):
+     *   stepper.c blocks on k_sem_take(K_FOREVER) until the step ISR fires.
+     *   PB0 in TIM3 AF mode cannot simultaneously trigger EXTI interrupts,
+     *   so stepper_move_to_degrees() will hang indefinitely until a dedicated
+     *   feedback GPIO is routed from the STEP net to a separate MCU pin.
+     *   Update step-gpios to that pin once it is available on the PCB.
+     */
+    zephyr_user: zephyr_user {
+        compatible = "zephyr,user";
+        pwms      = <&pwm3 3 100000 PWM_POLARITY_NORMAL>; /* TIM3_CH3, PB0 */
+        dir-gpios  = <&gpiob 1 GPIO_ACTIVE_HIGH>;          /* PB1            */
+        step-gpios = <&gpioc 3 GPIO_ACTIVE_HIGH>;          /* PC3 — dummy pin, avoids clobbering PB0 AF2 mode */
+    };
+
     mipi_dbi: mipi-dbi-spi {
         compatible = "zephyr,mipi-dbi-spi";
         dc-gpios    = <&gpiob 8 GPIO_ACTIVE_HIGH>;  /* VERIFY against schematic */
@@ -78,9 +99,42 @@
     status = "okay";
 };
 
+&gpioc {
+    status = "okay";
+};
+
+/* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
+&timers3 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    pwm3: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim3_ch3_pb0>;
+        pinctrl-names = "default";
+        #pwm-cells = <3>;
+    };
+};
+
 &spi1 {
     status = "okay";
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
     pinctrl-names = "default";
     cs-gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;  /* VERIFY CS pin against schematic */
+};
+
+/* SPI2 — DRV8452 SPI interface (PB12-PB15 via J502 jumper wires) */
+&spi2 {
+    status = "okay";
+    pinctrl-0 = <&spi2_sck_pb13 &spi2_miso_pb14 &spi2_mosi_pb15>;
+    pinctrl-names = "default";
+    cs-gpios = <&gpiob 12 GPIO_ACTIVE_LOW>;  /* nSCS — active low */
+
+    drv8452: drv8452@0 {
+        compatible = "vnd,spi-device";
+        reg = <0>;
+        spi-max-frequency = <5000000>;  /* DRV8452 max SPI CLK: 5 MHz     */
+        /* spi-cpol absent → CPOL=0                                        */
+        spi-cpha;                       /* CPHA=1 → Mode 1 (CPOL=0 CPHA=1) */
+    };
 };

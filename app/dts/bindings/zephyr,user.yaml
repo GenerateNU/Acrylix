@@ -1,0 +1,16 @@
+description: Generic zephyr,user node for passing board-level resources to application code.
+
+compatible: "zephyr,user"
+
+properties:
+  pwms:
+    type: phandle-array
+    description: PWM specifier for stepper STEP signal.
+
+  dir-gpios:
+    type: phandle-array
+    description: GPIO for stepper direction.
+
+  step-gpios:
+    type: phandle-array
+    description: GPIO feedback pin for counting step pulses.
