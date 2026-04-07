@@ -1,4 +1,5 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 
 /* Use internal HSI — no external crystal on PCB */
 &clk_hse {
@@ -15,6 +16,16 @@
 };
 
 / {
+    encoder: encoder {
+        compatible = "gpio-qdec";
+        gpios = <&gpioa 0 (GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>,
+                <&gpioa 1 (GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+        steps-per-period = <4>;     //controls how fast turning is (lower = faster, higher = slower)
+        zephyr,axis = <INPUT_REL_X>;
+        sample-time-us = <2000>;
+        idle-timeout-ms = <200>;
+    };
+
     chosen {
         zephyr,display = &ili9341;
     };

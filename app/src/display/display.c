@@ -412,7 +412,9 @@ int display_init(void)
     display_get_capabilities(display_dev, &caps);
     printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
-    /* Encoder check omitted — node not yet in overlay */
+    /* intialize encoder */
+    const struct device *enc_dev = DEVICE_DT_GET(DT_NODELABEL(encoder));
+    printk("Encoder %s\n", device_is_ready(enc_dev) ? "ready" : "NOT ready");
 
     init_styles();
     return 0;
