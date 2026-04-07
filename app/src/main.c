@@ -19,6 +19,7 @@ int main(void)
         printk("smoke test pin not ready\n");
     }
 
+    /* Intialize display and UI */
     printk("initializing display\n");
     int ret = display_init();
     if (ret != 0) {

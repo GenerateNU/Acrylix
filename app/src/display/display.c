@@ -3,6 +3,7 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
 #include <zephyr/input/input.h>
+#include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <lvgl.h>
 #include <stdio.h>
 
@@ -22,6 +23,11 @@
 
 /* ── Display device ── */
 static const struct device *display_dev;
+
+/* ── Encoder state ── */
+static int position  = 0;
+static int direction = 0;
+static K_MUTEX_DEFINE(encoder_mutex);
 
 /* ── UI elements ── */
 static lv_obj_t *position_label;
@@ -52,11 +58,6 @@ static lv_point_t  thick_wood_top_pts[2];
 static lv_point_t  thick_acrylic_bot_pts[2];
 static lv_point_t  thick_acrylic_top_pts[2];
 
-/* ── Encoder state ── */
-static int position  = 0;
-static int direction = 0;
-static K_MUTEX_DEFINE(encoder_mutex);
-
 /* ── LVGL styles ── */
 static lv_style_t style_screen;
 static lv_style_t style_title;
@@ -68,7 +69,7 @@ static lv_style_t style_line_wood;
 static bool styles_initialized = false;
 static bool line_styles_init   = false;
 
-/* ── sin lookup table (scaled to 1000) for 0..90 degrees ── */
+/* ── sin lookup table (scaled to 1000) for degrees ── */
 static const int16_t sin_lut[91] = {
        0,  17,  35,  52,  70,  87, 105, 122, 139, 156,
      174, 191, 208, 225, 242, 259, 276, 292, 309, 326,
@@ -83,14 +84,11 @@ static const int16_t sin_lut[91] = {
 };
 #define COS_LUT(a) sin_lut[90 - (a)]
 
-/* ══════════════════════════════════════════════════════════════
- *  Timer + exit — declared early so clear_screen can use them
- * ══════════════════════════════════════════════════════════════ */
-
 static void bend_anim_set_angle(int angle_deg);   /* forward declaration */
 
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
+/* bend angle clear screen */
 static void bend_angle_input_screen_exit(void)
 {
     k_timer_stop(&bend_anim_timer);
@@ -101,6 +99,7 @@ static void bend_angle_input_screen_exit(void)
     anim_value_label = NULL;
 }
 
+/* thickness clear screen */
 static void thick_anim_clear(void)
 {
     thick_wood_bot    = NULL;
@@ -110,10 +109,7 @@ static void thick_anim_clear(void)
     thick_value_label = NULL;
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Internal helpers
- * ══════════════════════════════════════════════════════════════ */
-
+/* intialize UI styles */
 static void init_styles(void)
 {
     if (styles_initialized) return;
@@ -158,6 +154,7 @@ static void init_line_styles(void)
     line_styles_init = true;
 }
 
+/* clear screen function */
 static void clear_screen(void)
 {
     bend_angle_input_screen_exit();
@@ -181,13 +178,28 @@ static lv_obj_t *make_label(lv_obj_t *parent,
     return lbl;
 }
 
-/* ── Encoder input callback ── */
+/* ── Input callback (encoder + buttons) ── */
 static void encoder_cb(struct input_event *evt)
 {
+    /* Forward button (PA8) — pressed only */
+    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER && evt->value == 1) {
+        printk("Button: forward\n");
+        input_selection_next();
+        return;
+    }
+
+    /* Backward button (PA9) — pressed only */
+    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC && evt->value == 1) {
+        printk("Button: backward\n");
+        input_selection_prev();
+        return;
+    }
+
+    /* Rotary encoder */
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
         int delta = (evt->value > 0) ? 1 : -1;
 
-        /* If bend angle screen is active, drive the animation */
+        /* If bend angle screen animation */
         if (anim_fixed_bot != NULL) {
             sel_bend_angle += delta;
             if (sel_bend_angle < 0)  sel_bend_angle = 0;
@@ -206,9 +218,7 @@ static void encoder_cb(struct input_event *evt)
 }
 INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
-/* ══════════════════════════════════════════════════════════════
- *  Public encoder API
- * ══════════════════════════════════════════════════════════════ */
+/* encoder API */
 
 int encoder_get_position(void) { return position; }
 
@@ -221,9 +231,7 @@ int encoder_get_direction(void)
     return dir;
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Bend animation
- * ══════════════════════════════════════════════════════════════ */
+/* bend angle animation */
 
 static void bend_anim_set_angle(int angle_deg)
 {
@@ -310,9 +318,7 @@ static void bend_anim_create(lv_obj_t *parent)
     lv_obj_align(anim_value_label, LV_ALIGN_CENTER, 60, 20);
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Thickness animation
- * ══════════════════════════════════════════════════════════════ */
+/* thickness animation */
 
 static void thick_anim_set(int thickness_mm)
 {
@@ -395,9 +401,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_align(thick_value_label, LV_ALIGN_RIGHT_MID, -10, 0);
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Display init
- * ══════════════════════════════════════════════════════════════ */
+/* intialize display screens */
 
 int display_init(void)
 {
@@ -420,11 +424,7 @@ int display_init(void)
     return 0;
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Screens
- * ══════════════════════════════════════════════════════════════ */
-
-/* SCREEN 1 — DIRECTIONS */
+/* SCREEN 1 — direction */
 void direction_screen(void)
 {
     printk("display: directions screen\n");
@@ -454,7 +454,7 @@ void direction_screen(void)
     lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -18);
 }
 
-/* SCREEN 2 — BEND ANGLE INPUT with animation */
+/* SCREEN 2 — bend angle input */
 void bend_angle_input_screen(void)
 {
     printk("display: bend angle input screen\n");
@@ -476,15 +476,27 @@ void bend_angle_input_screen(void)
     bend_anim_set_angle(0);
 }
 
-/* ══════════════════════════════════════════════════════════════
- *  Home screen alias
- * ══════════════════════════════════════════════════════════════ */
+/* next screen function - forward input button */
+void input_selection_next(void)
+{
+    if (anim_fixed_bot == NULL) {
+        /* Directions screen → go to bend angle input */
+        printk("Button: next — showing bend angle screen\n");
+        bend_angle_input_screen();
+    } else {
+        /* Bend angle screen → confirm and proceed */
+        printk("Button: next — bend_angle confirmed: %d deg\n", sel_bend_angle);
+    }
+}
+
+/* back screen function - backward input button */
+void input_selection_prev(void)
+{
+    printk("Button: prev\n");
+    direction_screen();
+}
 
 void display_create_home_screen(void) { direction_screen(); }
-
-/* ══════════════════════════════════════════════════════════════
- *  Periodic update — called every 10 ms from main loop
- * ══════════════════════════════════════════════════════════════ */
 
 void display_update(void)
 {
