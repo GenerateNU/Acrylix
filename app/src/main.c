@@ -26,7 +26,7 @@ static void any_input_cb(struct input_event *evt, void *user_data)
     printk("Input event: type=%d code=%d value=%d\n",
            evt->type, evt->code, evt->value);
 }
-INPUT_CALLBACK_DEFINE(NULL, any_input_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, any_input_cb);
 
 /* ── Thread stack sizes & priorities ───────────────────────────────────── */
 #define STATE_STACK_SIZE    2048

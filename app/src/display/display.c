@@ -4,9 +4,7 @@
 #include <zephyr/drivers/display.h>
 #include <zephyr/input/input.h>
 #include <lvgl.h>
-#include <lvgl_zephyr.h>
 #include <stdio.h>
-#include "../states/states.h"
 
 /* ── Bend animation geometry ── */
 #define ANIM_PIVOT_X   80
@@ -42,10 +40,10 @@ static lv_obj_t           *anim_fixed_top;
 static lv_obj_t           *anim_moving_bot;
 static lv_obj_t           *anim_moving_top;
 static lv_obj_t           *anim_value_label;
-static lv_point_precise_t  anim_fixed_bot_pts[2];
-static lv_point_precise_t  anim_fixed_top_pts[2];
-static lv_point_precise_t  anim_moving_bot_pts[2];
-static lv_point_precise_t  anim_moving_top_pts[2];
+static lv_point_t  anim_fixed_bot_pts[2];
+static lv_point_t  anim_fixed_top_pts[2];
+static lv_point_t  anim_moving_bot_pts[2];
+static lv_point_t  anim_moving_top_pts[2];
 static int                 auto_angle = 0;
 static int                 auto_dir   = 1;
 
@@ -55,10 +53,18 @@ static lv_obj_t           *thick_wood_top;
 static lv_obj_t           *thick_acrylic_bot;
 static lv_obj_t           *thick_acrylic_top;
 static lv_obj_t           *thick_value_label;
-static lv_point_precise_t  thick_wood_bot_pts[2];
-static lv_point_precise_t  thick_wood_top_pts[2];
-static lv_point_precise_t  thick_acrylic_bot_pts[2];
-static lv_point_precise_t  thick_acrylic_top_pts[2];
+static lv_point_t  thick_wood_bot_pts[2];
+static lv_point_t  thick_wood_top_pts[2];
+static lv_point_t  thick_acrylic_bot_pts[2];
+static lv_point_t  thick_acrylic_top_pts[2];
+
+/* ── Bend radius selection elements ── */
+static const char *radius_labels[3]   = { "0.125\"", "0.25\"", "0.5\"" };
+static const int   radius_arc_size[3] = { 25, 40, 60 };
+static int         sel_radius_idx     = 0;
+static lv_obj_t   *radius_arc         = NULL;
+static lv_obj_t   *radius_value_label = NULL;
+static lv_obj_t   *radius_option_labels[3];
 
 /* ── Input selection state ── */
 typedef enum {
@@ -140,6 +146,15 @@ static void thick_anim_clear(void)
     thick_value_label = NULL;
 }
 
+static void radius_anim_clear(void)
+{
+    radius_arc              = NULL;
+    radius_value_label      = NULL;
+    radius_option_labels[0] = NULL;
+    radius_option_labels[1] = NULL;
+    radius_option_labels[2] = NULL;
+}
+
 /* ══════════════════════════════════════════════════════════════
  *  Internal helpers
  * ══════════════════════════════════════════════════════════════ */
@@ -192,6 +207,7 @@ static void clear_screen(void)
 {
     bend_angle_input_screen_exit();
     thick_anim_clear();
+    radius_anim_clear();
     bar                 = NULL;
     input_value_label   = NULL;
     process_value_label = NULL;
@@ -216,23 +232,29 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 }
 
 /* ── Encoder input callback ── */
-static void encoder_cb(struct input_event *evt, void *user_data)
+static void encoder_cb(struct input_event *evt)
 {
-    ARG_UNUSED(user_data);
     if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
-        k_mutex_lock(&encoder_mutex, K_FOREVER);
-        if (evt->value > 0) {
-            position = MIN(position + 1, 100);
-            direction = 1;
-        } else {
-            position = MAX(position - 1, 0);
-            direction = -1;
+        int delta = (evt->value > 0) ? 1 : -1;
+
+        /* Bend angle screen: encoder drives the animation */
+        if (anim_fixed_bot != NULL) {
+            sel_bend_angle += delta;
+            if (sel_bend_angle < 0)  sel_bend_angle = 0;
+            if (sel_bend_angle > 90) sel_bend_angle = 90;
+            bend_anim_set_angle(sel_bend_angle);
+            printk("Bend angle: %d deg\n", sel_bend_angle);
+            return;
         }
+
+        k_mutex_lock(&encoder_mutex, K_FOREVER);
+        position += delta;
+        direction = delta;
         k_mutex_unlock(&encoder_mutex);
         printk("Encoder position: %d direction: %d\n", position, direction);
     }
 }
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
 /* ══════════════════════════════════════════════════════════════
  *  Public encoder API
@@ -344,11 +366,9 @@ static void bend_anim_create(lv_obj_t *parent)
 
 static void thick_anim_set(int thickness_mm)
 {
-    /* Map 0–50mm to THICK_MIN_GAP–THICK_MAX_GAP px */
-    int gap      = THICK_MIN_GAP + (thickness_mm * (THICK_MAX_GAP - THICK_MIN_GAP)) / 50;
+    int gap       = THICK_MIN_GAP + (thickness_mm * (THICK_MAX_GAP - THICK_MIN_GAP)) / 50;
     int acrylic_y = THICK_BOT_Y - gap - THICK_LAYER_GAP;
 
-    /* Bottom bar (wood) — fixed */
     thick_wood_bot_pts[0].x = THICK_X;
     thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
     thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
@@ -359,7 +379,6 @@ static void thick_anim_set(int thickness_mm)
     thick_wood_top_pts[1].x = THICK_X + THICK_BAR_LEN;
     thick_wood_top_pts[1].y = THICK_BOT_Y;
 
-    /* Top bar (acrylic) — moves up as thickness increases */
     thick_acrylic_bot_pts[0].x = THICK_X;
     thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
     thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
@@ -388,7 +407,6 @@ static void thick_anim_create(lv_obj_t *parent)
 
     int acrylic_y = THICK_BOT_Y - THICK_MIN_GAP - THICK_LAYER_GAP;
 
-    /* Bottom bar — grey then white */
     thick_wood_bot_pts[0].x = THICK_X;
     thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
     thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
@@ -405,7 +423,6 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_line_set_points(thick_wood_top, thick_wood_top_pts, 2);
     lv_obj_add_style(thick_wood_top, &style_line_acrylic, 0);
 
-    /* Top bar (acrylic) — grey then white, starts at min gap */
     thick_acrylic_bot_pts[0].x = THICK_X;
     thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
     thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
@@ -422,11 +439,98 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
     lv_obj_add_style(thick_acrylic_top, &style_line_acrylic, 0);
 
-    /* Value label — right side */
     thick_value_label = lv_label_create(parent);
     lv_label_set_text(thick_value_label, "0 mm");
     lv_obj_add_style(thick_value_label, &style_title, 0);
     lv_obj_align(thick_value_label, LV_ALIGN_RIGHT_MID, -10, 0);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  Bend radius selection
+ * ══════════════════════════════════════════════════════════════ */
+
+static void radius_screen_set(int idx)
+{
+    if (idx < 0) idx = 0;
+    if (idx > 2) idx = 2;
+    sel_radius_idx = idx;
+
+    /* Resize arc to show tighter/looser curve */
+    if (radius_arc != NULL) {
+        int sz = radius_arc_size[idx] * 2;
+        lv_obj_set_size(radius_arc, sz, sz);
+        lv_obj_align(radius_arc, LV_ALIGN_LEFT_MID, 20, 0);
+    }
+
+    /* Update selected value label */
+    if (radius_value_label != NULL) {
+        lv_label_set_text(radius_value_label, radius_labels[idx]);
+    }
+
+    /* Highlight selected option, dim others */
+    for (int i = 0; i < 3; i++) {
+        if (radius_option_labels[i] == NULL) continue;
+        if (i == idx) {
+            lv_obj_set_style_text_color(radius_option_labels[i],
+                                        lv_color_white(), LV_PART_MAIN);
+            lv_obj_set_style_text_font(radius_option_labels[i],
+                                       &lv_font_montserrat_18, LV_PART_MAIN);
+        } else {
+            lv_obj_set_style_text_color(radius_option_labels[i],
+                                        lv_color_hex(0x555555), LV_PART_MAIN);
+            lv_obj_set_style_text_font(radius_option_labels[i],
+                                       &lv_font_montserrat_16, LV_PART_MAIN);
+        }
+    }
+}
+
+static void radius_input_screen(void)
+{
+    clear_screen();
+
+    make_label(lv_scr_act(), &style_note, "3 / 3",
+               LV_ALIGN_TOP_RIGHT, -10, 10);
+    make_label(lv_scr_act(), &style_title, "Bend Radius",
+               LV_ALIGN_TOP_MID, 0, 15);
+
+    /* Arc — quarter circle showing inner bend curve, left side */
+    radius_arc = lv_arc_create(lv_scr_act());
+    lv_arc_set_angles(radius_arc, 180, 270);
+    lv_arc_set_bg_angles(radius_arc, 180, 270);
+    lv_obj_set_size(radius_arc,
+                    radius_arc_size[0] * 2,
+                    radius_arc_size[0] * 2);
+    lv_obj_set_style_arc_color(radius_arc, lv_color_white(),        LV_PART_INDICATOR);
+    lv_obj_set_style_arc_width(radius_arc, 6,                       LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(radius_arc, lv_color_hex(0x222222),  LV_PART_MAIN);
+    lv_obj_set_style_arc_width(radius_arc, 2,                       LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(radius_arc,    LV_OPA_TRANSP,           LV_PART_KNOB);
+    lv_obj_set_style_pad_all(radius_arc,   0,                       LV_PART_KNOB);
+    lv_arc_set_mode(radius_arc, LV_ARC_MODE_NORMAL);
+    lv_obj_align(radius_arc, LV_ALIGN_LEFT_MID, 20, 0);
+
+    /* Selected value label below arc */
+    radius_value_label = make_label(lv_scr_act(), &style_subtitle,
+                                    radius_labels[0],
+                                    LV_ALIGN_LEFT_MID, 15, 65);
+
+    /* Three option labels stacked on the right */
+    static const lv_coord_t option_y[3] = { -30, 0, 30 };
+    for (int i = 0; i < 3; i++) {
+        radius_option_labels[i] = lv_label_create(lv_scr_act());
+        lv_label_set_text(radius_option_labels[i], radius_labels[i]);
+        lv_obj_align(radius_option_labels[i],
+                     LV_ALIGN_RIGHT_MID, -15, option_y[i]);
+    }
+
+    make_label(lv_scr_act(), &style_body,
+               "Hit " LV_SYMBOL_PLAY " to confirm\n"
+               "Hit " LV_SYMBOL_STOP " to return",
+               LV_ALIGN_BOTTOM_MID, 0, -10);
+
+    /* Apply initial highlight */
+    sel_radius_idx = 0;
+    radius_screen_set(0);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -435,8 +539,6 @@ static void thick_anim_create(lv_obj_t *parent)
 
 int display_init(void)
 {
-    lvgl_init();
-
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
     if (!device_is_ready(display_dev)) {
         printk("Display not ready\n");
@@ -528,38 +630,9 @@ static void thickness_input_screen(void)
                LV_ALIGN_TOP_MID, 0, 15);
 
     thick_anim_create(lv_scr_act());
-
-    /* input_value_label wired up so encoder updates work */
     input_value_label = thick_value_label;
 
     make_label(lv_scr_act(), &style_body,
-               "Hit " LV_SYMBOL_PLAY " to proceed\n"
-               "Hit " LV_SYMBOL_STOP " to return",
-               LV_ALIGN_BOTTOM_MID, 0, -10);
-}
-
-/* Generic input sub-screen (bend radii) */
-static void input_screen(const char *title, const char *unit, int value)
-{
-    clear_screen();
-
-    char step_buf[8];
-    snprintf(step_buf, sizeof(step_buf), "%d / %d",
-             (int)current_input_step + 1, (int)INPUT_COUNT);
-    make_label(lv_scr_act(), &style_note, step_buf,
-               LV_ALIGN_TOP_RIGHT, -10, 10);
-
-    make_label(lv_scr_act(), &style_title, title,
-               LV_ALIGN_CENTER, 60, -25);
-
-    char val_buf[16];
-    snprintf(val_buf, sizeof(val_buf), "%d %s", value, unit);
-    input_value_label = make_label(lv_scr_act(), &style_title, val_buf,
-                                   LV_ALIGN_CENTER, 60, 5);
-
-    /* TODO: image/animation placeholder — add here when ready */
-
-    make_label(lv_scr_act(), &style_subtitle,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
                "Hit " LV_SYMBOL_STOP " to return",
                LV_ALIGN_BOTTOM_MID, 0, -10);
@@ -569,9 +642,9 @@ static void input_selection_show_step(void)
 {
     bend_angle_input_screen_exit();
     switch (current_input_step) {
-        case INPUT_BEND_ANGLE: bend_angle_input_screen();                         break;
-        case INPUT_THICKNESS:  thickness_input_screen();                          break;
-        case INPUT_BEND_RADII: input_screen("Bend Radii", "mm", sel_bend_radii);  break;
+        case INPUT_BEND_ANGLE: bend_angle_input_screen(); break;
+        case INPUT_THICKNESS:  thickness_input_screen();  break;
+        case INPUT_BEND_RADII: radius_input_screen();     break;
         default: break;
     }
 }
@@ -583,6 +656,7 @@ static void input_selection_screen(void)
     sel_bend_angle = 0;
     sel_thickness  = 0;
     sel_bend_radii = 0;
+    sel_radius_idx = 0;
     input_selection_show_step();
 }
 
@@ -592,12 +666,10 @@ void input_selection_next(void)
         current_input_step++;
         input_selection_show_step();
     } else {
-        g_inputs.bend_angle = sel_bend_angle;
-        g_inputs.thickness  = sel_thickness;
-        g_inputs.bend_radii = sel_bend_radii;
-        printk("Inputs confirmed: angle=%d thickness=%d radii=%d\n",
-               g_inputs.bend_angle, g_inputs.thickness, g_inputs.bend_radii);
-        sm_transition(STATE_BEND);
+        printk("Inputs confirmed: angle=%d thickness=%d radii_idx=%d (%s)\n",
+               sel_bend_angle, sel_thickness,
+               sel_radius_idx, radius_labels[sel_radius_idx]);
+        /* TODO: sm_transition(STATE_BEND) when state machine is wired up */
     }
 }
 
@@ -607,7 +679,8 @@ void input_selection_prev(void)
         current_input_step--;
         input_selection_show_step();
     } else {
-        sm_transition(STATE_IDLE);
+        /* TODO: sm_transition(STATE_IDLE) when state machine is wired up */
+        direction_screen();
     }
 }
 
@@ -620,21 +693,23 @@ void input_selection_update_value(int delta)
             break;
         case INPUT_THICKNESS:
             sel_thickness = CLAMP(sel_thickness + delta, 0, 50);
-            thick_anim_set(sel_thickness);   /* live update animation */
+            thick_anim_set(sel_thickness);
             break;
         case INPUT_BEND_RADII:
-            sel_bend_radii = CLAMP(sel_bend_radii + delta, 0, 100);
+            radius_screen_set(sel_radius_idx + delta);
+            sel_bend_radii = sel_radius_idx;
             break;
         default:
             break;
     }
 
-    if (input_value_label != NULL) {
+    /* Update generic value label if present (not used for radius screen) */
+    if (input_value_label != NULL &&
+        current_input_step != INPUT_BEND_RADII) {
         char val_buf[16];
         const char *unit = (current_input_step == INPUT_BEND_ANGLE) ? "deg" : "mm";
         int val = (current_input_step == INPUT_BEND_ANGLE) ? sel_bend_angle :
-                  (current_input_step == INPUT_THICKNESS)  ? sel_thickness  :
-                                                             sel_bend_radii;
+                                                             sel_thickness;
         snprintf(val_buf, sizeof(val_buf), "%d %s", val, unit);
         lv_label_set_text(input_value_label, val_buf);
     }
@@ -713,12 +788,12 @@ void display_create_home_screen(void) { direction_screen(); }
 
 void display_set_state(int state)
 {
-    switch ((system_state_t)state) {
-        case STATE_IDLE:           direction_screen();                          break;
-        case STATE_INITIALIZATION: input_selection_screen();                    break;
-        case STATE_BEND:           process_screen("Bending...", "0\xC2\xB0");   break;
-        case STATE_COOL:           process_screen("Cooling...", "");            break;
-        case STATE_COMPLETE:       complete_screen();                           break;
+    switch (state) {
+        case 0: direction_screen();                          break; /* IDLE */
+        case 1: input_selection_screen();                    break; /* INITIALIZATION */
+        case 2: process_screen("Bending...", "0\xC2\xB0");  break; /* BEND */
+        case 3: process_screen("Cooling...", "");            break; /* COOL */
+        case 4: complete_screen();                           break; /* COMPLETE */
         default: break;
     }
 }
