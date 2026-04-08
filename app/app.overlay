@@ -2,6 +2,7 @@
 #include <zephyr/dt-bindings/display/panel.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/adc/adc.h>
 
 / {
     chosen {
@@ -126,3 +127,27 @@
  *   PB6=nCS  PB7=SCLK  PB8=MOSI  PB5=MISO
  * NOTE: PB6 overlaps SPI1 cs-gpios (display) and PB8 overlaps MIPI DBI dc-gpios.
  * Display will not work while DRV8452 bit-bang is active on these pins. */
+
+/* ADC1_IN15 on PC5 — PT1000 temperature sensing via voltage divider */
+&pinctrl {
+    adc1_in15_pc5: adc1_in15_pc5 {
+        pinmux = <STM32_PINMUX('C', 5, ANALOG)>;
+    };
+};
+
+&adc1 {
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    pinctrl-0 = <&adc1_in15_pc5>;
+    pinctrl-names = "default";
+    st,adc-prescaler = <4>; /* APB2=90MHz → ADC clk=22.5MHz (max 36MHz) */
+
+    channel@f {
+        reg = <15>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,resolution = <12>;
+    };
+};

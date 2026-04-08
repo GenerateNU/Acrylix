@@ -121,7 +121,7 @@ void stepper_move_degrees(float degrees, float rpm)
     if (degrees == 0.0f) return;
 
     // Account for discrepancies in micro-stepping (quick and dirty fix)
-    degrees = degrees / 2.0; 
+    degrees = degrees / 2.0f; 
 
     float abs_deg = degrees > 0.0f ? degrees : -degrees;
     long  steps   = (long)((abs_deg / 360.0f) * (float)STEPS_PER_REV);

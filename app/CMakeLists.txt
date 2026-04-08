@@ -14,4 +14,5 @@ target_sources(app PRIVATE
 	src/stepper/drv8452_spi.c
 	src/stepper/stepper.c
 	src/temp/temp.c
+	src/temp/temp_sensor.c
 	src/states/states.c)
