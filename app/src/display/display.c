@@ -41,10 +41,10 @@ static lv_obj_t           *anim_fixed_top;
 static lv_obj_t           *anim_moving_bot;
 static lv_obj_t           *anim_moving_top;
 static lv_obj_t           *anim_value_label;
-static lv_point_t  anim_fixed_bot_pts[2];
-static lv_point_t  anim_fixed_top_pts[2];
-static lv_point_t  anim_moving_bot_pts[2];
-static lv_point_t  anim_moving_top_pts[2];
+static lv_point_precise_t  anim_fixed_bot_pts[2];
+static lv_point_precise_t  anim_fixed_top_pts[2];
+static lv_point_precise_t  anim_moving_bot_pts[2];
+static lv_point_precise_t  anim_moving_top_pts[2];
 static int                 sel_bend_angle = 0;
 
 /* ── Thickness animation elements ── */
@@ -53,10 +53,10 @@ static lv_obj_t           *thick_wood_top;
 static lv_obj_t           *thick_acrylic_bot;
 static lv_obj_t           *thick_acrylic_top;
 static lv_obj_t           *thick_value_label;
-static lv_point_t  thick_wood_bot_pts[2];
-static lv_point_t  thick_wood_top_pts[2];
-static lv_point_t  thick_acrylic_bot_pts[2];
-static lv_point_t  thick_acrylic_top_pts[2];
+static lv_point_precise_t  thick_wood_bot_pts[2];
+static lv_point_precise_t  thick_wood_top_pts[2];
+static lv_point_precise_t  thick_acrylic_bot_pts[2];
+static lv_point_precise_t  thick_acrylic_top_pts[2];
 
 /* ── LVGL styles ── */
 static lv_style_t style_screen;
@@ -85,6 +85,8 @@ static const int16_t sin_lut[91] = {
 #define COS_LUT(a) sin_lut[90 - (a)]
 
 static void bend_anim_set_angle(int angle_deg);   /* forward declaration */
+void input_selection_next(void);
+void input_selection_prev(void);
 
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
@@ -179,8 +181,9 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 }
 
 /* ── Input callback (encoder + buttons) ── */
-static void encoder_cb(struct input_event *evt)
+static void encoder_cb(struct input_event *evt, void *user_data)
 {
+    ARG_UNUSED(user_data);
     printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
 
     /* Forward button (PA8) */
@@ -223,7 +226,7 @@ static void encoder_cb(struct input_event *evt)
         printk("Encoder: %s — position %d\n", dir_str, position);
     }
 }
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
 
 /* encoder API */
 

@@ -19,12 +19,12 @@
     buttons: buttons {
         compatible = "gpio-keys";
         btn_forward: btn_forward {
-            gpios = <&gpioa 8 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            gpios = <&gpioa 8 GPIO_ACTIVE_LOW>;
             zephyr,code = <INPUT_KEY_ENTER>;
             label = "Forward";
         };
         btn_backward: btn_backward {
-            gpios = <&gpioa 9 (GPIO_PULL_UP | GPIO_ACTIVE_LOW)>;
+            gpios = <&gpioa 9 GPIO_ACTIVE_LOW>;
             zephyr,code = <INPUT_KEY_ESC>;
             label = "Backward";
         };
@@ -32,8 +32,8 @@
 
     encoder: encoder {
         compatible = "gpio-qdec";
-        gpios = <&gpioa 0 (GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>,
-                <&gpioa 1 (GPIO_PULL_UP | GPIO_ACTIVE_HIGH)>;
+        gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>,
+                <&gpioa 1 GPIO_ACTIVE_HIGH>;
         steps-per-period = <1>;
         zephyr,axis = <INPUT_REL_X>;
         sample-time-us = <2000>;

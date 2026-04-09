@@ -1,56 +1,72 @@
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
-#include "display/display.h"
+// #include "display/display.h"
 
-#define SMOKE_PIN_NODE DT_NODELABEL(gpiob)
-#define SMOKE_PIN      5
+// #define BTN_FWD_PIN 8
+// #define BTN_BCK_PIN 9
+
+static const struct device *gpioc;
+static volatile int32_t enc_count = 0;
+static struct gpio_callback enc_cb_data;
+
+static void enc_isr(const struct device *dev, struct gpio_callback *cb,
+                    uint32_t pins)
+{
+    int a = gpio_pin_get(gpioc, 10);
+    int b = gpio_pin_get(gpioc, 11);
+    /* CW: A leads B — on A rising edge, B is low */
+    /* CCW: B leads A — on A rising edge, B is high */
+    if (a == b) {
+        enc_count--;
+    } else {
+        enc_count++;
+    }
+}
+
+static void encoder_init(void)
+{
+    gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    if (!device_is_ready(gpioc)) {
+        printk("GPIOC not ready\n");
+        return;
+    }
+    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_UP);
+
+    gpio_pin_interrupt_configure(gpioc, 10, GPIO_INT_EDGE_BOTH);
+
+    gpio_init_callback(&enc_cb_data, enc_isr, BIT(10));
+    gpio_add_callback(gpioc, &enc_cb_data);
+}
 
 int main(void)
 {
-    printk("project starting\n");
+    printk("encoder test starting\n");
 
-    /* Smoke test — PB5 toggles every 500ms to confirm MCU is running */
-    printk("initializing smoke test pin PB5\n");
-    const struct device *gpiob = DEVICE_DT_GET(DT_NODELABEL(gpiob));
-    if (device_is_ready(gpiob)) {
-        gpio_pin_configure(gpiob, SMOKE_PIN, GPIO_OUTPUT_INACTIVE);
-        printk("smoke test pin ready\n");
-    } else {
-        printk("smoke test pin not ready\n");
-    }
+    // /* Button test */
+    // const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
+    // gpio_pin_configure(gpioa, BTN_BCK_PIN, GPIO_INPUT | GPIO_PULL_DOWN);
+    // printk("reading PA8 (forward button)...\n");
+    // int last = -1;
+    // while (1) {
+    //     int val = gpio_pin_get(gpioa, BTN_BCK_PIN);
+    //     if (val != last) {
+    //         printk("BTN_FWD (PA8) = %d\n", val);
+    //         last = val;
+    //     }
+    //     k_msleep(10);
+    // }
 
-    /* Intialize display and UI */
-    printk("initializing display\n");
-    int ret = display_init();
-    if (ret != 0) {
-        printk("display_init failed: %d\n", ret);
-    } else {
-        printk("display initialized, creating home screen\n");
-        bend_angle_input_screen();
-        printk("home screen created\n");
-    }
+    encoder_init();
 
-    /* Raw GPIO read on PA0/PA1 to confirm encoder signals are reaching the MCU */
-    const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
-    gpio_pin_configure(gpioa, 0, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpioa, 1, GPIO_INPUT | GPIO_PULL_UP);
-
-    printk("entering main loop\n");
-    int last_a = -1, last_b = -1;
+    int32_t last = 0;
     while (1) {
-        display_update();
-        gpio_pin_toggle(gpiob, SMOKE_PIN);
-
-        int a = gpio_pin_get(gpioa, 0);
-        int b = gpio_pin_get(gpioa, 1);
-        if (a != last_a || b != last_b) {
-            printk("GPIO raw: PA0=%d PA1=%d\n", a, b);
-            last_a = a;
-            last_b = b;
+        if (enc_count != last) {
+            printk("ENC count: %d\n", enc_count);
+            last = enc_count;
         }
-
-        k_msleep(10);
+        k_msleep(200);
     }
 
-    return 0;
+    // return 0;
 }
