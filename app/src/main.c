@@ -1,23 +1,29 @@
 #include <zephyr/kernel.h>
-#include <zephyr/sys/printk.h>
-#include "temp/temp_sensor.h"
-// #include "stepper/drv8452_spi.h"
-// #include "stepper/stepper.h"
+#include <zephyr/logging/log.h>
+#include <zephyr/drivers/gpio.h>
+#include "temp/temp_control.h"
+
+LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
 
 int main(void)
 {
-    printk("=== AcrylicBender boot ===\n");
+    LOG_INF("=== AcrylicBender boot ===");
 
-    temp_thread_init();
+    temp_init();
+    heater_start();
 
-    // if (drv8452_spi_init() != 0) {
-    //     printk("drv8452_spi_init failed\n");
-    //     return -1;
-    // }
+    // /* SSR toggle test — PC9 high/low every 2 seconds */
+    // const struct device *gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    // gpio_pin_configure(gpioc, 9, GPIO_OUTPUT_INACTIVE);
 
-    // if (stepper_init() != 0) {
-    //     printk("stepper_init failed\n");
-    //     return -1;
+    // while (1) {
+    //     gpio_pin_set(gpioc, 9, 1);
+    //     LOG_INF("SSR ON");
+    //     k_sleep(K_SECONDS(2));
+
+    //     gpio_pin_set(gpioc, 9, 0);
+    //     LOG_INF("SSR OFF");
+    //     k_sleep(K_SECONDS(2));
     // }
 
     return 0;

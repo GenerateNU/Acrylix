@@ -15,8 +15,8 @@
 
 LOG_MODULE_REGISTER(temp_sensor, LOG_LEVEL_INF);
 
-static double ema_temp = -999.0;  /* uninitialized sentinel */
-#define EMA_ALPHA 0.2             /* 0.0 = no update, 1.0 = no filter */
+static float ema_temp = -999.0f;  /* uninitialized sentinel */
+#define EMA_ALPHA 0.2f            /* 0.0 = no update, 1.0 = no filter */
 
 static const struct device *adc_dev = DEVICE_DT_GET(DT_NODELABEL(adc1));
 
@@ -76,14 +76,14 @@ static void temp_sensor_thread(void *a, void *b, void *c)
             float R = V / 0.000412f;
             float T = (R / 1000.0f - 1.0f) / 0.00385f;
 
-            if (ema_temp < -900.0) {
+            if (ema_temp < -900.0f) {
                 ema_temp = T;
             } else {
-                ema_temp = EMA_ALPHA * T + (1.0 - EMA_ALPHA) * ema_temp;
+                ema_temp = EMA_ALPHA * T + (1.0f - EMA_ALPHA) * ema_temp;
             }
 
             LOG_INF("ADC avg=%d min=%d max=%d (spread=%d)", avg, mn, mx, mx - mn);
-            LOG_INF("T_raw=%.1f T_ema=%.1f C", (double)T, ema_temp);
+            LOG_INF("T_raw=%.1f T_ema=%.1f C", (double)T, (double)ema_temp);
         }
 
         k_sleep(K_SECONDS(1));
@@ -92,6 +92,8 @@ static void temp_sensor_thread(void *a, void *b, void *c)
 
 static K_THREAD_STACK_DEFINE(temp_stack, 1024);
 static struct k_thread temp_thread_data;
+
+float temp_get_ema(void) { return ema_temp; }
 
 void temp_thread_init(void)
 {
