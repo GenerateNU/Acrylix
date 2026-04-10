@@ -2,10 +2,14 @@
 #include "display.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/display.h>
+#include <zephyr/drivers/gpio.h>
 #include <zephyr/input/input.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/logging/log.h>
 #include <lvgl.h>
 #include <stdio.h>
+
+LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 
 /* ── Bend animation geometry ── */
 #define ANIM_PIVOT_X   80
@@ -25,10 +29,10 @@
 /* ── Display device ── */
 static const struct device *display_dev;
 
-/* ── Encoder state ── */
-static int position  = 0;
-static int direction = 0;
-static K_MUTEX_DEFINE(encoder_mutex);
+/* ── UI encoder state (PC10=A, PC11=B) ── */
+static const struct device  *gpioc_enc;
+static volatile int32_t      enc_count = 0;
+static struct gpio_callback  enc_cb_data;
 
 /* ── UI elements ── */
 static lv_obj_t *bar;
@@ -40,10 +44,10 @@ static lv_obj_t           *anim_fixed_top;
 static lv_obj_t           *anim_moving_bot;
 static lv_obj_t           *anim_moving_top;
 static lv_obj_t           *anim_value_label;
-static lv_point_t  anim_fixed_bot_pts[2];
-static lv_point_t  anim_fixed_top_pts[2];
-static lv_point_t  anim_moving_bot_pts[2];
-static lv_point_t  anim_moving_top_pts[2];
+static lv_point_precise_t  anim_fixed_bot_pts[2];
+static lv_point_precise_t  anim_fixed_top_pts[2];
+static lv_point_precise_t  anim_moving_bot_pts[2];
+static lv_point_precise_t  anim_moving_top_pts[2];
 static int                 sel_bend_angle = 0;
 
 /* ── Thickness animation elements ── */
@@ -52,10 +56,10 @@ static lv_obj_t           *thick_wood_top;
 static lv_obj_t           *thick_acrylic_bot;
 static lv_obj_t           *thick_acrylic_top;
 static lv_obj_t           *thick_value_label;
-static lv_point_t  thick_wood_bot_pts[2];
-static lv_point_t  thick_wood_top_pts[2];
-static lv_point_t  thick_acrylic_bot_pts[2];
-static lv_point_t  thick_acrylic_top_pts[2];
+static lv_point_precise_t  thick_wood_bot_pts[2];
+static lv_point_precise_t  thick_wood_top_pts[2];
+static lv_point_precise_t  thick_acrylic_bot_pts[2];
+static lv_point_precise_t  thick_acrylic_top_pts[2];
 /* 0 = 1/16 mm, 1 = 1/8 mm */
 static int sel_thickness = 0;
 
@@ -87,6 +91,32 @@ static const int16_t sin_lut[91] = {
 
 static void bend_anim_set_angle(int angle_deg);   /* forward declaration */
 static void thick_anim_set(int idx);              /* forward declaration */
+int input_selection_next(void);
+int input_selection_prev(void);
+
+/* ── UI encoder ISR — PC10 triggers on both edges ── */
+static void enc_isr(const struct device *dev, struct gpio_callback *cb,
+                    uint32_t pins)
+{
+    int a = gpio_pin_get(gpioc_enc, 10);
+    int b = gpio_pin_get(gpioc_enc, 11);
+    if (a != b) { enc_count++; } else { enc_count--; }
+}
+
+void encoder_init(void)
+{
+    gpioc_enc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    if (!device_is_ready(gpioc_enc)) {
+        printk("GPIOC not ready\n");
+        return;
+    }
+    gpio_pin_configure(gpioc_enc, 10, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioc_enc, 11, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_interrupt_configure(gpioc_enc, 10, GPIO_INT_EDGE_BOTH);
+    gpio_init_callback(&enc_cb_data, enc_isr, BIT(10));
+    gpio_add_callback(gpioc_enc, &enc_cb_data);
+    printk("Encoder: init (PC10=A, PC11=B)\n");
+}
 
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
@@ -182,14 +212,15 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 }
 
 /* ── Input callback (encoder + buttons) ── */
-static void encoder_cb(struct input_event *evt)
+static void encoder_cb(struct input_event *evt, void *user_data)
 {
+    ARG_UNUSED(user_data);
     printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
 
     /* Forward button (PA8) */
     if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER) {
         if (evt->value == 1) {
-            printk("Button: forward pressed\n");
+            LOG_INF("FORWARD button pressed");
             input_selection_next();
         }
         return;
@@ -198,57 +229,19 @@ static void encoder_cb(struct input_event *evt)
     /* Backward button (PA9) */
     if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC) {
         if (evt->value == 1) {
-            printk("Button: backward pressed\n");
+            LOG_INF("BACK button pressed");
             input_selection_prev();
         }
         return;
     }
-
-    /* Rotary encoder */
-    if (evt->type == INPUT_EV_REL && evt->code == INPUT_REL_X) {
-        int delta = (evt->value > 0) ? 1 : -1;
-        const char *dir_str = (delta > 0) ? "CW" : "CCW";
-
-        if (anim_fixed_bot != NULL) {
-            /* Bend angle screen — encoder controls angle */
-            sel_bend_angle += delta;
-            if (sel_bend_angle < 0)  sel_bend_angle = 0;
-            if (sel_bend_angle > 90) sel_bend_angle = 90;
-            bend_anim_set_angle(sel_bend_angle);
-            printk("Encoder: %s — bend angle %d deg\n", dir_str, sel_bend_angle);
-            return;
-        }
-
-        if (thick_wood_bot != NULL) {
-            /* Thickness screen — encoder toggles between 1/16 and 1/8 mm */
-            sel_thickness ^= 1;
-            thick_anim_set(sel_thickness);
-            printk("Encoder: %s — thickness %s\n", dir_str,
-                   sel_thickness == 1 ? "1/8 mm" : "1/16 mm");
-            return;
-        }
-
-        k_mutex_lock(&encoder_mutex, K_FOREVER);
-        position += delta;
-        direction = delta;
-        k_mutex_unlock(&encoder_mutex);
-        printk("Encoder: %s — position %d\n", dir_str, position);
-    }
 }
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
 
 /* encoder API */
 
-int encoder_get_position(void) { return position; }
+int encoder_get_position(void) { return (int)enc_count; }
 
-int encoder_get_direction(void)
-{
-    k_mutex_lock(&encoder_mutex, K_FOREVER);
-    int dir = direction;
-    direction = 0;
-    k_mutex_unlock(&encoder_mutex);
-    return dir;
-}
+int encoder_get_direction(void) { return 0; }
 
 /* bend angle animation */
 
@@ -422,12 +415,24 @@ static void thick_anim_create(lv_obj_t *parent)
 
 int display_init(void)
 {
+    printk("LCD init: starting\n");
+
+    const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi1));
+    printk("LCD init: SPI device get: %p\n", (void *)spi_dev);
+    printk("LCD init: SPI ready: %d\n", device_is_ready(spi_dev));
+
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
+    printk("LCD init: display device get: %p\n", (void *)display_dev);
+    printk("LCD init: display ready: %d\n", device_is_ready(display_dev));
     if (!device_is_ready(display_dev)) {
         printk("Display not ready\n");
+        printk("LCD init: complete, returning %d\n", -1);
         return -1;
     }
-    display_blanking_off(display_dev);
+
+    printk("LCD init: calling blanking off\n");
+    int ret = display_blanking_off(display_dev);
+    printk("LCD init: blanking off returned %d\n", ret);
 
     struct display_capabilities caps;
     display_get_capabilities(display_dev, &caps);
@@ -450,6 +455,7 @@ int display_init(void)
     }
 
     init_styles();
+    printk("LCD init: complete, returning %d\n", 0);
     return 0;
 }
 
@@ -612,5 +618,22 @@ void display_create_home_screen(void) { direction_screen(); }
 
 void display_update(void)
 {
+    /* Drain UI encoder count into active screen */
+    static int32_t last_enc = 0;
+    int32_t curr  = enc_count;
+    int32_t delta = curr - last_enc;
+    if (delta != 0) {
+        last_enc = curr;
+        if (anim_fixed_bot != NULL) {
+            sel_bend_angle += (int)delta;
+            if (sel_bend_angle < 0)  sel_bend_angle = 0;
+            if (sel_bend_angle > 90) sel_bend_angle = 90;
+            bend_anim_set_angle(sel_bend_angle);
+        } else if (thick_wood_bot != NULL) {
+            sel_thickness ^= 1;
+            thick_anim_set(sel_thickness);
+        }
+    }
+
     lv_task_handler();
 }
