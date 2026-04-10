@@ -18,8 +18,9 @@
 #define THICK_BAR_LEN    130
 #define THICK_BOT_Y      155
 #define THICK_LAYER_GAP  5
-#define THICK_MIN_GAP    8
-#define THICK_MAX_GAP    24
+/* Gap between wood and acrylic lines — visually represents acrylic thickness */
+#define THICK_GAP_1_16   8   /* 1/16 mm */
+#define THICK_GAP_1_8    18  /* 1/8 mm  (visually ~double) */
 
 /* ── Display device ── */
 static const struct device *display_dev;
@@ -30,10 +31,8 @@ static int direction = 0;
 static K_MUTEX_DEFINE(encoder_mutex);
 
 /* ── UI elements ── */
-static lv_obj_t *position_label;
-static lv_obj_t *direction_label;
-static lv_obj_t *state_label;
 static lv_obj_t *bar;
+static bool on_radius_screen = false;
 
 /* ── Bend animation elements ── */
 static lv_obj_t           *anim_fixed_bot;
@@ -57,6 +56,8 @@ static lv_point_t  thick_wood_bot_pts[2];
 static lv_point_t  thick_wood_top_pts[2];
 static lv_point_t  thick_acrylic_bot_pts[2];
 static lv_point_t  thick_acrylic_top_pts[2];
+/* 0 = 1/16 mm, 1 = 1/8 mm */
+static int sel_thickness = 0;
 
 /* ── LVGL styles ── */
 static lv_style_t style_screen;
@@ -85,6 +86,7 @@ static const int16_t sin_lut[91] = {
 #define COS_LUT(a) sin_lut[90 - (a)]
 
 static void bend_anim_set_angle(int angle_deg);   /* forward declaration */
+static void thick_anim_set(int idx);              /* forward declaration */
 
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
@@ -160,6 +162,7 @@ static void clear_screen(void)
     bend_angle_input_screen_exit();
     thick_anim_clear();
     bar = NULL;
+    on_radius_screen = false;
     lv_obj_clean(lv_scr_act());
     lv_obj_add_style(lv_scr_act(), &style_screen, 0);
 }
@@ -213,6 +216,15 @@ static void encoder_cb(struct input_event *evt)
             if (sel_bend_angle > 90) sel_bend_angle = 90;
             bend_anim_set_angle(sel_bend_angle);
             printk("Encoder: %s — bend angle %d deg\n", dir_str, sel_bend_angle);
+            return;
+        }
+
+        if (thick_wood_bot != NULL) {
+            /* Thickness screen — encoder toggles between 1/16 and 1/8 mm */
+            sel_thickness ^= 1;
+            thick_anim_set(sel_thickness);
+            printk("Encoder: %s — thickness %s\n", dir_str,
+                   sel_thickness == 1 ? "1/8 mm" : "1/16 mm");
             return;
         }
 
@@ -326,10 +338,9 @@ static void bend_anim_create(lv_obj_t *parent)
 }
 
 /* thickness animation */
-
-static void thick_anim_set(int thickness_mm)
+static void thick_anim_set(int idx)
 {
-    int gap      = THICK_MIN_GAP + (thickness_mm * (THICK_MAX_GAP - THICK_MIN_GAP)) / 50;
+    int gap = (idx == 1) ? THICK_GAP_1_8 : THICK_GAP_1_16;
     int acrylic_y = THICK_BOT_Y - gap - THICK_LAYER_GAP;
 
     thick_wood_bot_pts[0].x = THICK_X;
@@ -358,17 +369,16 @@ static void thick_anim_set(int thickness_mm)
     if (thick_acrylic_top != NULL) lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
 
     if (thick_value_label != NULL) {
-        char buf[16];
-        snprintf(buf, sizeof(buf), "%d mm", thickness_mm);
-        lv_label_set_text(thick_value_label, buf);
+        lv_label_set_text(thick_value_label, (idx == 1) ? "1/8 mm" : "1/16 mm");
     }
 }
 
 static void thick_anim_create(lv_obj_t *parent)
 {
     init_line_styles();
+    sel_thickness = 0; /* always start at 1/16 mm */
 
-    int acrylic_y = THICK_BOT_Y - THICK_MIN_GAP - THICK_LAYER_GAP;
+    int acrylic_y = THICK_BOT_Y - THICK_GAP_1_16 - THICK_LAYER_GAP;
 
     thick_wood_bot_pts[0].x = THICK_X;
     thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
@@ -403,7 +413,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_add_style(thick_acrylic_top, &style_line_acrylic, 0);
 
     thick_value_label = lv_label_create(parent);
-    lv_label_set_text(thick_value_label, "0 mm");
+    lv_label_set_text(thick_value_label, "1/16 mm");
     lv_obj_add_style(thick_value_label, &style_title, 0);
     lv_obj_align(thick_value_label, LV_ALIGN_RIGHT_MID, -10, 0);
 }
@@ -473,7 +483,33 @@ void direction_screen(void)
     lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -18);
 }
 
-/* SCREEN 2 — bend angle input */
+/* SCREEN 2 — BEND RADIUS REMINDER */
+void bend_radius_screen(void)
+{
+    printk("display: bend radius screen\n");
+    clear_screen();
+    on_radius_screen = true;
+
+    make_label(lv_scr_act(), &style_subtitle, "Set Bend Radius",
+               LV_ALIGN_TOP_MID, 0, 20);
+
+    lv_obj_t *msg = lv_label_create(lv_scr_act());
+    lv_label_set_long_mode(msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(msg, lv_pct(85));
+    lv_obj_set_height(msg, LV_SIZE_CONTENT);
+    lv_label_set_text(msg,
+        "Before proceeding, manually adjust the bend radius knob (2) "
+        "to your desired radius and tighten the locking nuts to secure it.");
+    lv_obj_add_style(msg, &style_body, 0);
+    lv_obj_align(msg, LV_ALIGN_CENTER, 0, -10);
+
+    make_label(lv_scr_act(), &style_note,
+               "Hit " LV_SYMBOL_PLAY " when ready\n"
+               "Hit " LV_SYMBOL_PREV " to return",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
+}
+
+/* SCREEN 3 — bend angle input */
 void bend_angle_input_screen(void)
 {
     printk("display: bend angle input screen\n");
@@ -488,31 +524,88 @@ void bend_angle_input_screen(void)
 
     make_label(lv_scr_act(), &style_body,
                "Hit " LV_SYMBOL_PLAY " to proceed\n"
-               "Hit " LV_SYMBOL_STOP " to return",
+               "Hit " LV_SYMBOL_PREV " to return",
                LV_ALIGN_BOTTOM_MID, 0, -15);
 
     sel_bend_angle = 0;
     bend_anim_set_angle(0);
 }
 
-/* next screen function - forward input button */
-void input_selection_next(void)
+/* SCREEN 4 — acrylic thickness selection */
+void thickness_screen(void)
 {
-    if (anim_fixed_bot == NULL) {
-        /* Directions screen → go to bend angle input */
-        printk("Button: next — showing bend angle screen\n");
+    printk("display: thickness screen\n");
+    clear_screen();
+
+    make_label(lv_scr_act(), &style_note, "3 / 3",
+               LV_ALIGN_TOP_RIGHT, -10, 10);
+    make_label(lv_scr_act(), &style_title, "Thickness",
+               LV_ALIGN_CENTER, 60, -25);
+
+    thick_anim_create(lv_scr_act());
+
+    make_label(lv_scr_act(), &style_body,
+               "Turn to toggle thickness\n"
+               "Hit " LV_SYMBOL_PLAY " to confirm\n"
+               "Hit " LV_SYMBOL_PREV " to return",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
+}
+
+typedef enum {
+    INPUT_STEP_BEND_RADIUS = 0,
+    INPUT_STEP_BEND_ANGLE,
+    INPUT_STEP_THICKNESS,
+    INPUT_STEP_COUNT
+} input_step_t;
+
+static input_step_t input_step = INPUT_STEP_BEND_RADIUS;
+
+static void input_show_step(input_step_t step)
+{
+    switch (step) {
+    case INPUT_STEP_BEND_RADIUS:
+        bend_radius_screen();
+        break;
+    case INPUT_STEP_BEND_ANGLE:
         bend_angle_input_screen();
-    } else {
-        /* Bend angle screen → confirm and proceed */
-        printk("Button: next — bend_angle confirmed: %d deg\n", sel_bend_angle);
+        break;
+    case INPUT_STEP_THICKNESS:
+        thickness_screen();
+        break;
+    default:
+        break;
     }
 }
 
-/* back screen function - backward input button */
-void input_selection_prev(void)
+void input_selection_enter(void)
 {
-    printk("Button: prev\n");
-    direction_screen();
+    input_step = INPUT_STEP_BEND_RADIUS;
+    input_show_step(input_step);
+}
+
+int input_selection_next(void)
+{
+    if (input_step < INPUT_STEP_THICKNESS) {
+        input_step++;
+        input_show_step(input_step);
+        return 0;
+    }
+    /* Last step confirmed */
+    printk("Input confirmed — bend angle: %d deg, thickness: %s\n",
+           sel_bend_angle, sel_thickness == 1 ? "1/8 mm" : "1/16 mm");
+    return 1;
+}
+
+int input_selection_prev(void)
+{
+    if (input_step > INPUT_STEP_BEND_RADIUS) {
+        input_step--;
+        input_show_step(input_step);
+        return 0;
+    }
+    /* First step — signal exit to state machine */
+    printk("Input cancelled\n");
+    return -1;
 }
 
 void display_create_home_screen(void) { direction_screen(); }
