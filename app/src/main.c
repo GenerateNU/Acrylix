@@ -30,12 +30,8 @@ int main(void)
         printk("home screen created\n");
     }
 
-    /* Raw GPIO read on PA0/PA1 to confirm encoder signals are reaching the MCU */
-    const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
-    gpio_pin_configure(gpioa, 0, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpioa, 1, GPIO_INPUT | GPIO_PULL_UP);
-
     /* Button debug pins — PA8=forward, PA9=backward */
+    const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
     gpio_pin_configure(gpioa, 8, GPIO_INPUT | GPIO_PULL_UP);
     gpio_pin_configure(gpioa, 9, GPIO_INPUT | GPIO_PULL_UP);
     printk("Button pins configured: PA8=forward PA9=backward\n");
