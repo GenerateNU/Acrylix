@@ -30,9 +30,12 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 static const struct device *display_dev;
 
 /* ── UI encoder state (PC10=A, PC11=B) ── */
-static const struct device  *gpioc_enc;
+static const struct device  *gpioc;
 static volatile int32_t      enc_count = 0;
 static struct gpio_callback  enc_cb_data;
+static int position = 0;
+static int direction = 0;
+static K_MUTEX_DEFINE(encoder_mutex);
 
 /* ── UI elements ── */
 static lv_obj_t *bar;
@@ -44,10 +47,10 @@ static lv_obj_t           *anim_fixed_top;
 static lv_obj_t           *anim_moving_bot;
 static lv_obj_t           *anim_moving_top;
 static lv_obj_t           *anim_value_label;
-static lv_point_precise_t  anim_fixed_bot_pts[2];
-static lv_point_precise_t  anim_fixed_top_pts[2];
-static lv_point_precise_t  anim_moving_bot_pts[2];
-static lv_point_precise_t  anim_moving_top_pts[2];
+static lv_point_t  anim_fixed_bot_pts[2];
+static lv_point_t  anim_fixed_top_pts[2];
+static lv_point_t  anim_moving_bot_pts[2];
+static lv_point_t  anim_moving_top_pts[2];
 static int                 sel_bend_angle = 0;
 
 /* ── Thickness animation elements ── */
@@ -56,10 +59,10 @@ static lv_obj_t           *thick_wood_top;
 static lv_obj_t           *thick_acrylic_bot;
 static lv_obj_t           *thick_acrylic_top;
 static lv_obj_t           *thick_value_label;
-static lv_point_precise_t  thick_wood_bot_pts[2];
-static lv_point_precise_t  thick_wood_top_pts[2];
-static lv_point_precise_t  thick_acrylic_bot_pts[2];
-static lv_point_precise_t  thick_acrylic_top_pts[2];
+static lv_point_t  thick_wood_bot_pts[2];
+static lv_point_t  thick_wood_top_pts[2];
+static lv_point_t  thick_acrylic_bot_pts[2];
+static lv_point_t  thick_acrylic_top_pts[2];
 /* 0 = 1/16 mm, 1 = 1/8 mm */
 static int sel_thickness = 0;
 
@@ -98,26 +101,60 @@ int input_selection_prev(void);
 static void enc_isr(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
 {
-    int a = gpio_pin_get(gpioc_enc, 10);
-    int b = gpio_pin_get(gpioc_enc, 11);
-    if (a != b) { enc_count++; } else { enc_count--; }
+    int a = gpio_pin_get(gpioc, 10);
+    int b = gpio_pin_get(gpioc, 11);
+    int delta;
+    if (a == b) {
+        enc_count--;
+        delta = -1;
+    } else {
+        enc_count++;
+        delta = 1;
+    }
+
+    /* Bend angle screen: encoder drives the animation directly */
+    if (anim_fixed_bot != NULL) {
+        sel_bend_angle += delta;
+        if (sel_bend_angle < 0)  sel_bend_angle = 0;
+        if (sel_bend_angle > 90) sel_bend_angle = 90;
+        bend_anim_set_angle(sel_bend_angle);
+        printk("Bend angle: %d deg\n", sel_bend_angle);
+        return;
+    }
+
+    /* All other screens: update position/direction under mutex */
+    /* NOTE: k_mutex_lock is NOT ISR-safe — use atomic or a flag instead */
+    position += delta;
+    direction = delta;
+    printk("Encoder position: %d direction: %d\n", position, direction);
 }
 
 void encoder_init(void)
 {
-    gpioc_enc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
-    if (!device_is_ready(gpioc_enc)) {
+    gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    if (!device_is_ready(gpioc)) {
         printk("GPIOC not ready\n");
         return;
     }
-    gpio_pin_configure(gpioc_enc, 10, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpioc_enc, 11, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_interrupt_configure(gpioc_enc, 10, GPIO_INT_EDGE_BOTH);
+    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_interrupt_configure(gpioc, 10, GPIO_INT_EDGE_BOTH);
     gpio_init_callback(&enc_cb_data, enc_isr, BIT(10));
-    gpio_add_callback(gpioc_enc, &enc_cb_data);
+    gpio_add_callback(gpioc, &enc_cb_data);
     printk("Encoder: init (PC10=A, PC11=B)\n");
 }
 
+void buttons_init(void)
+{
+    const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
+    if (!device_is_ready(gpioa)) {
+        printk("GPIOA not ready\n");
+        return;
+    }
+    gpio_pin_configure(gpioa, 8, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioa, 9, GPIO_INPUT | GPIO_PULL_UP);
+    printk("Buttons: init (PA8=forward, PA9=backward)\n");
+}
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
 /* bend angle clear screen */
@@ -212,14 +249,14 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 }
 
 /* ── Input callback (encoder + buttons) ── */
-static void encoder_cb(struct input_event *evt, void *user_data)
+static void encoder_cb(struct input_event *evt)
 {
-    ARG_UNUSED(user_data);
     printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
 
     /* Forward button (PA8) */
     if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER) {
         if (evt->value == 1) {
+            printk("forward button pressed\n");
             LOG_INF("FORWARD button pressed");
             input_selection_next();
         }
@@ -229,13 +266,14 @@ static void encoder_cb(struct input_event *evt, void *user_data)
     /* Backward button (PA9) */
     if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC) {
         if (evt->value == 1) {
+            printk("back button pressed\n");
             LOG_INF("BACK button pressed");
             input_selection_prev();
         }
         return;
     }
 }
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
 /* encoder API */
 
@@ -439,17 +477,13 @@ int display_init(void)
     printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
     /* encoder */
-    const struct device *enc_dev = DEVICE_DT_GET(DT_NODELABEL(encoder));
-    if (device_is_ready(enc_dev)) {
-        printk("Encoder: ready (PA0=A, PA1=B)\n");
-    } else {
-        printk("Encoder: NOT ready — check overlay gpio-qdec node\n");
-    }
+    encoder_init();
+    //buttons_init();
 
     /* buttons */
     const struct device *btn_dev = DEVICE_DT_GET(DT_NODELABEL(buttons));
     if (device_is_ready(btn_dev)) {
-        printk("Buttons: ready (PA8=forward, PA9=backward)\n");
+        printk("Buttons: ready (PB15=forward, PB14=backward)\n");
     } else {
         printk("Buttons: NOT ready — check overlay gpio-keys node\n");
     }
@@ -618,22 +652,5 @@ void display_create_home_screen(void) { direction_screen(); }
 
 void display_update(void)
 {
-    /* Drain UI encoder count into active screen */
-    static int32_t last_enc = 0;
-    int32_t curr  = enc_count;
-    int32_t delta = curr - last_enc;
-    if (delta != 0) {
-        last_enc = curr;
-        if (anim_fixed_bot != NULL) {
-            sel_bend_angle += (int)delta;
-            if (sel_bend_angle < 0)  sel_bend_angle = 0;
-            if (sel_bend_angle > 90) sel_bend_angle = 90;
-            bend_anim_set_angle(sel_bend_angle);
-        } else if (thick_wood_bot != NULL) {
-            sel_thickness ^= 1;
-            thick_anim_set(sel_thickness);
-        }
-    }
-
     lv_task_handler();
 }
