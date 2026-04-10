@@ -40,10 +40,10 @@ static lv_obj_t           *anim_fixed_top;
 static lv_obj_t           *anim_moving_bot;
 static lv_obj_t           *anim_moving_top;
 static lv_obj_t           *anim_value_label;
-static lv_point_precise_t  anim_fixed_bot_pts[2];
-static lv_point_precise_t  anim_fixed_top_pts[2];
-static lv_point_precise_t  anim_moving_bot_pts[2];
-static lv_point_precise_t  anim_moving_top_pts[2];
+static lv_point_t  anim_fixed_bot_pts[2];
+static lv_point_t  anim_fixed_top_pts[2];
+static lv_point_t  anim_moving_bot_pts[2];
+static lv_point_t  anim_moving_top_pts[2];
 static int                 sel_bend_angle = 0;
 
 /* ── Thickness animation elements ── */
@@ -182,9 +182,8 @@ static lv_obj_t *make_label(lv_obj_t *parent,
 }
 
 /* ── Input callback (encoder + buttons) ── */
-static void encoder_cb(struct input_event *evt, void *user_data)
+static void encoder_cb(struct input_event *evt)
 {
-    ARG_UNUSED(user_data);
     printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
 
     /* Forward button (PA8) */
@@ -236,7 +235,7 @@ static void encoder_cb(struct input_event *evt, void *user_data)
         printk("Encoder: %s — position %d\n", dir_str, position);
     }
 }
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb, NULL);
+INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
 /* encoder API */
 

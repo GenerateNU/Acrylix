@@ -8,7 +8,7 @@ project(app)
 
 target_sources(app PRIVATE
 	src/main.c
-	# src/display/display.c
+	src/display/display.c
 )
 
 # Re-enable when ready:
