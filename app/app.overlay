@@ -17,19 +17,19 @@
 };
 
 / {
-    buttons: buttons {
+    /*buttons: buttons {
         compatible = "gpio-keys";
         btn_forward: btn_forward {
-            gpios = <&gpiob 10 GPIO_ACTIVE_LOW>;
+            gpios = <&gpiob 10 (GPIO_ACTIVE_LOW)>;
             zephyr,code = <INPUT_KEY_ENTER>;
             label = "Forward";
         };
         btn_backward: btn_backward {
-            gpios = <&gpiob 14 GPIO_ACTIVE_LOW>;
+            gpios = <&gpiob 15 (GPIO_ACTIVE_LOW)>;
             zephyr,code = <INPUT_KEY_ESC>;
             label = "Backward";
         };
-    };
+    };*/
 
     /*encoder: encoder {
         compatible = "gpio-qdec";

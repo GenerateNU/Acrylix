@@ -31,31 +31,26 @@ int main(void)
         printk("home screen created\n");
     }
 
-    /* Button debug pins — PB15=forward, PB14=backward */
+    /* Test PB10 backward button */
     const struct device *gpiob = DEVICE_DT_GET(DT_NODELABEL(gpiob));
-    gpio_pin_configure(gpiob, 15, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpiob, 14, GPIO_INPUT | GPIO_PULL_UP);
-    printk("Button pins configured: PB15=forward PB14=backward\n");
+    gpio_pin_configure(gpiob, 10, GPIO_INPUT);
+    gpio_pin_configure(gpiob, 15, GPIO_INPUT);
+
+    int last_fwd = gpio_pin_get_raw(gpiob, 10);
+    int last_bwd = gpio_pin_get_raw(gpiob, 15);
+    printk("PB10 forward intial: %d\n", last_fwd);
+    printk("PB15 backward initial: %d\n", last_bwd);
 
     printk("entering main loop\n");
-    int last_fwd = 1, last_bck = 1; /* active low, idle = 1 */
     while (1) {
         display_update();
-        gpio_pin_toggle(gpiob, SMOKE_PIN);
 
-        int fwd = gpio_pin_get(gpiob, 15);
-        int bck = gpio_pin_get(gpiob, 14);
+        int fwd = gpio_pin_get_raw(gpiob, 10);
+        int bwd = gpio_pin_get_raw(gpiob, 15);
 
-        if (fwd != last_fwd) {
-            printk("PB15 (forward): %s\n", fwd == 0 ? "PRESSED" : "released");
-            last_fwd = fwd;
-        }
-        if (bck != last_bck) {
-            printk("PB14 (backward): %s\n", bck == 0 ? "PRESSED" : "released");
-            last_bck = bck;
-        }
+        printk("PB10 (forward): %d  PB15 (backward): %d\n", fwd, bwd);
 
-        k_msleep(10);
+        k_msleep(200);
     }
 
     return 0;

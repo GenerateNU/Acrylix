@@ -17,14 +17,7 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 #define ANIM_BAR_LEN   60
 #define ANIM_LAYER_GAP 6
 
-/* ── Thickness animation geometry ── */
-#define THICK_X          20
-#define THICK_BAR_LEN    130
-#define THICK_BOT_Y      155
-#define THICK_LAYER_GAP  5
-/* Gap between wood and acrylic lines — visually represents acrylic thickness */
-#define THICK_GAP_1_16   8   /* 1/16 mm */
-#define THICK_GAP_1_8    18  /* 1/8 mm  (visually ~double) */
+#define DEBOUNCE_MS 300
 
 /* ── Display device ── */
 static const struct device *display_dev;
@@ -36,6 +29,13 @@ static struct gpio_callback  enc_cb_data;
 static int position = 0;
 static int direction = 0;
 static K_MUTEX_DEFINE(encoder_mutex);
+
+/* ── Button state (PB10=forward, PB15=backward) ── */
+static const struct device  *gpiob;
+static struct gpio_callback  btn_fwd_cb_data;
+static struct gpio_callback  btn_bck_cb_data;
+static volatile bool btn_fwd_pressed = false;
+static volatile bool btn_bck_pressed = false;
 
 /* ── UI elements ── */
 static lv_obj_t *bar;
@@ -65,6 +65,8 @@ static lv_point_t  thick_acrylic_bot_pts[2];
 static lv_point_t  thick_acrylic_top_pts[2];
 /* 0 = 1/16 mm, 1 = 1/8 mm */
 static int sel_thickness = 0;
+static lv_obj_t *thick_bar_line = NULL;
+static volatile bool thick_update_pending = false;
 
 /* ── LVGL styles ── */
 static lv_style_t style_screen;
@@ -76,6 +78,15 @@ static lv_style_t style_line_acrylic;
 static lv_style_t style_line_wood;
 static bool styles_initialized = false;
 static bool line_styles_init   = false;
+
+typedef enum {
+    INPUT_STEP_BEND_RADIUS = 0,
+    INPUT_STEP_BEND_ANGLE,
+    INPUT_STEP_THICKNESS,
+    INPUT_STEP_COUNT
+} input_step_t;
+
+static input_step_t input_step = INPUT_STEP_BEND_RADIUS;
 
 /* ── sin lookup table (scaled to 1000) for degrees ── */
 static const int16_t sin_lut[91] = {
@@ -97,22 +108,30 @@ static void thick_anim_set(int idx);              /* forward declaration */
 int input_selection_next(void);
 int input_selection_prev(void);
 
-/* ── UI encoder ISR — PC10 triggers on both edges ── */
+/* ── UI encoder ISR — PC11 triggers on both edges ── */
+static int enc_raw = 0;
+
 static void enc_isr(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
 {
     int a = gpio_pin_get(gpioc, 10);
     int b = gpio_pin_get(gpioc, 11);
-    int delta;
-    if (a == b) {
-        enc_count--;
-        delta = -1;
+
+    if (a != b) {
+        enc_raw++;
     } else {
-        enc_count++;
-        delta = 1;
+        enc_raw--;
     }
 
-    /* Bend angle screen: encoder drives the animation directly */
+    /* Only update every 2 raw pulses — adjust to 1, 2, or 4 to match detent feel */
+    int new_count = enc_raw / 2;
+    if (new_count == enc_count) {
+        return;
+    }
+    int delta = (new_count > enc_count) ? 1 : -1;
+    enc_count = new_count;
+
+    /* Bend angle screen */
     if (anim_fixed_bot != NULL) {
         sel_bend_angle += delta;
         if (sel_bend_angle < 0)  sel_bend_angle = 0;
@@ -122,8 +141,14 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
         return;
     }
 
-    /* All other screens: update position/direction under mutex */
-    /* NOTE: k_mutex_lock is NOT ISR-safe — use atomic or a flag instead */
+    /* Thickness screen — toggle between 1/16 and 1/8 on any encoder movement */
+    if (thick_bar_line != NULL) {
+        sel_thickness ^= 1;
+        thick_update_pending = true;
+        printk("Thickness toggled: %s\n", sel_thickness == 1 ? "1/8 in" : "1/16 in");
+        return;
+    }
+
     position += delta;
     direction = delta;
     printk("Encoder position: %d direction: %d\n", position, direction);
@@ -138,22 +163,92 @@ void encoder_init(void)
     }
     gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_UP);
     gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_interrupt_configure(gpioc, 10, GPIO_INT_EDGE_BOTH);
-    gpio_init_callback(&enc_cb_data, enc_isr, BIT(10));
+    gpio_pin_interrupt_configure(gpioc, 11, GPIO_INT_EDGE_FALLING);
+    gpio_init_callback(&enc_cb_data, enc_isr, BIT(11));
     gpio_add_callback(gpioc, &enc_cb_data);
-    printk("Encoder: init (PC10=A, PC11=B)\n");
+    printk("Encoder: init (PC10=A, PC11=B, IRQ on PC11/EXTI11)\n");
+}
+
+static void btn_fwd_isr(const struct device *dev, struct gpio_callback *cb,
+                         uint32_t pins)
+{
+    static int64_t last_press = 0;
+    int64_t now = k_uptime_get();
+    if ((now - last_press) < DEBOUNCE_MS) {
+        return;
+    }
+    last_press = now;
+
+    if (gpio_pin_get(gpiob, 10) == 0) {
+        printk("=== FORWARD button pressed (step %d) ===\n", input_step);
+        btn_fwd_pressed = true;
+    }
+}
+
+static void btn_bck_isr(const struct device *dev, struct gpio_callback *cb,
+                         uint32_t pins)
+{
+    static int64_t last_press = 0;
+    int64_t now = k_uptime_get();
+    if ((now - last_press) < DEBOUNCE_MS) {
+        return;
+    }
+    last_press = now;
+
+    if (gpio_pin_get(gpiob, 15) == 0) {
+        printk("=== BACK button pressed (step %d) ===\n", input_step);
+        btn_bck_pressed = true;
+    }
 }
 
 void buttons_init(void)
 {
-    const struct device *gpioa = DEVICE_DT_GET(DT_NODELABEL(gpioa));
-    if (!device_is_ready(gpioa)) {
-        printk("GPIOA not ready\n");
+    gpiob = DEVICE_DT_GET(DT_NODELABEL(gpiob));
+    if (!device_is_ready(gpiob)) {
+        printk("GPIOB not ready\n");
         return;
     }
-    gpio_pin_configure(gpioa, 8, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpioa, 9, GPIO_INPUT | GPIO_PULL_UP);
-    printk("Buttons: init (PA8=forward, PA9=backward)\n");
+    gpio_pin_configure(gpiob, 10, GPIO_INPUT);   //forward
+    gpio_pin_configure(gpiob, 15, GPIO_INPUT);   //backward
+
+    gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_FALLING);
+    gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_FALLING);
+
+    gpio_init_callback(&btn_fwd_cb_data, btn_fwd_isr, BIT(10));
+    gpio_init_callback(&btn_bck_cb_data, btn_bck_isr, BIT(15));
+
+    gpio_add_callback(gpiob, &btn_fwd_cb_data);
+    gpio_add_callback(gpiob, &btn_bck_cb_data);
+
+    printk("Buttons: init (PB10=forward, PB15=backward)\n");
+}
+
+void button_pressed(void)
+{
+    if (btn_fwd_pressed) {
+        btn_fwd_pressed = false;
+        printk("=== FORWARD button pressed (step %d -> %d) ===\n",
+               input_step, input_step + 1);
+        int ret = input_selection_next();
+        if (ret == 1) {
+            printk(">>> All inputs confirmed, ready to bend\n");
+        } else {
+            printk(">>> Advanced to step %d\n", input_step);
+        }
+    }
+
+    if (btn_bck_pressed) {
+        btn_bck_pressed = false;
+        printk("=== BACK button pressed (step %d -> %d) ===\n",
+               input_step, input_step - 1);
+        int ret = input_selection_prev();
+        if (ret == -1) {
+            printk(">>> Cancelled — returning to directions screen\n");
+            direction_screen();
+        } else {
+            printk(">>> Returned to step %d\n", input_step);
+        }
+    }
 }
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
@@ -176,6 +271,7 @@ static void thick_anim_clear(void)
     thick_acrylic_bot = NULL;
     thick_acrylic_top = NULL;
     thick_value_label = NULL;
+    thick_bar_line    = NULL;
 }
 
 /* intialize UI styles */
@@ -247,33 +343,6 @@ static lv_obj_t *make_label(lv_obj_t *parent,
     lv_obj_align(lbl, align, x_ofs, y_ofs);
     return lbl;
 }
-
-/* ── Input callback (encoder + buttons) ── */
-static void encoder_cb(struct input_event *evt)
-{
-    printk("input event: type=%d code=%d value=%d\n", evt->type, evt->code, evt->value);
-
-    /* Forward button (PA8) */
-    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ENTER) {
-        if (evt->value == 1) {
-            printk("forward button pressed\n");
-            LOG_INF("FORWARD button pressed");
-            input_selection_next();
-        }
-        return;
-    }
-
-    /* Backward button (PA9) */
-    if (evt->type == INPUT_EV_KEY && evt->code == INPUT_KEY_ESC) {
-        if (evt->value == 1) {
-            printk("back button pressed\n");
-            LOG_INF("BACK button pressed");
-            input_selection_prev();
-        }
-        return;
-    }
-}
-INPUT_CALLBACK_DEFINE(NULL, encoder_cb);
 
 /* encoder API */
 
@@ -371,82 +440,52 @@ static void bend_anim_create(lv_obj_t *parent)
 /* thickness animation */
 static void thick_anim_set(int idx)
 {
-    int gap = (idx == 1) ? THICK_GAP_1_8 : THICK_GAP_1_16;
-    int acrylic_y = THICK_BOT_Y - gap - THICK_LAYER_GAP;
+    if (thick_bar_line == NULL) return;
 
-    thick_wood_bot_pts[0].x = THICK_X;
-    thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
-    thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_wood_bot_pts[1].y = THICK_BOT_Y + THICK_LAYER_GAP;
-
-    thick_wood_top_pts[0].x = THICK_X;
-    thick_wood_top_pts[0].y = THICK_BOT_Y;
-    thick_wood_top_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_wood_top_pts[1].y = THICK_BOT_Y;
-
-    thick_acrylic_bot_pts[0].x = THICK_X;
-    thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
-    thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_acrylic_bot_pts[1].y = acrylic_y + THICK_LAYER_GAP;
-
-    thick_acrylic_top_pts[0].x = THICK_X;
-    thick_acrylic_top_pts[0].y = acrylic_y;
-    thick_acrylic_top_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_acrylic_top_pts[1].y = acrylic_y;
-
-    if (thick_wood_bot    != NULL) lv_line_set_points(thick_wood_bot,    thick_wood_bot_pts,    2);
-    if (thick_wood_top    != NULL) lv_line_set_points(thick_wood_top,    thick_wood_top_pts,    2);
-    if (thick_acrylic_bot != NULL) lv_line_set_points(thick_acrylic_bot, thick_acrylic_bot_pts, 2);
-    if (thick_acrylic_top != NULL) lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
+    /* Thicker line sits higher to grow upward from the gray base */
+    lv_obj_set_style_line_width(thick_bar_line,
+                                (idx == 1) ? 10 : 4,
+                                LV_PART_MAIN);
+    lv_obj_invalidate(thick_bar_line);
 
     if (thick_value_label != NULL) {
-        lv_label_set_text(thick_value_label, (idx == 1) ? "1/8 mm" : "1/16 mm");
+        lv_label_set_text(thick_value_label,
+                          (idx == 1) ? "1/8 in" : "1/16 in");
     }
+    printk("Thickness: %s\n", (idx == 1) ? "1/8 in" : "1/16 in");
 }
 
 static void thick_anim_create(lv_obj_t *parent)
 {
-    init_line_styles();
-    sel_thickness = 0; /* always start at 1/16 mm */
+    sel_thickness = 0;
 
-    int acrylic_y = THICK_BOT_Y - THICK_GAP_1_16 - THICK_LAYER_GAP;
+    /* Gray base bar — fixed, same style as bend angle wood bar */
+    static lv_point_t base_pts[2] = {
+        {20, 155},
+        {140, 155}
+    };
+    lv_obj_t *base_bar = lv_line_create(parent);
+    lv_line_set_points(base_bar, base_pts, 2);
+    lv_obj_set_style_line_color(base_bar, lv_color_hex(0x888888), LV_PART_MAIN);
+    lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    thick_wood_bot_pts[0].x = THICK_X;
-    thick_wood_bot_pts[0].y = THICK_BOT_Y + THICK_LAYER_GAP;
-    thick_wood_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_wood_bot_pts[1].y = THICK_BOT_Y + THICK_LAYER_GAP;
-    thick_wood_bot = lv_line_create(parent);
-    lv_line_set_points(thick_wood_bot, thick_wood_bot_pts, 2);
-    lv_obj_add_style(thick_wood_bot, &style_line_wood, 0);
+    /* White acrylic bar — sits on top of gray bar, changes thickness */
+    static lv_point_t acrylic_pts[2] = {
+        {20, 147},
+        {140, 147}
+    };
+    thick_bar_line = lv_line_create(parent);
+    lv_line_set_points(thick_bar_line, acrylic_pts, 2);
+    lv_obj_set_style_line_color(thick_bar_line, lv_color_white(), LV_PART_MAIN);
+    lv_obj_set_style_line_width(thick_bar_line, 4, LV_PART_MAIN);
+    lv_obj_set_style_line_rounded(thick_bar_line, true, LV_PART_MAIN);
 
-    thick_wood_top_pts[0].x = THICK_X;
-    thick_wood_top_pts[0].y = THICK_BOT_Y;
-    thick_wood_top_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_wood_top_pts[1].y = THICK_BOT_Y;
-    thick_wood_top = lv_line_create(parent);
-    lv_line_set_points(thick_wood_top, thick_wood_top_pts, 2);
-    lv_obj_add_style(thick_wood_top, &style_line_acrylic, 0);
-
-    thick_acrylic_bot_pts[0].x = THICK_X;
-    thick_acrylic_bot_pts[0].y = acrylic_y + THICK_LAYER_GAP;
-    thick_acrylic_bot_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_acrylic_bot_pts[1].y = acrylic_y + THICK_LAYER_GAP;
-    thick_acrylic_bot = lv_line_create(parent);
-    lv_line_set_points(thick_acrylic_bot, thick_acrylic_bot_pts, 2);
-    lv_obj_add_style(thick_acrylic_bot, &style_line_wood, 0);
-
-    thick_acrylic_top_pts[0].x = THICK_X;
-    thick_acrylic_top_pts[0].y = acrylic_y;
-    thick_acrylic_top_pts[1].x = THICK_X + THICK_BAR_LEN;
-    thick_acrylic_top_pts[1].y = acrylic_y;
-    thick_acrylic_top = lv_line_create(parent);
-    lv_line_set_points(thick_acrylic_top, thick_acrylic_top_pts, 2);
-    lv_obj_add_style(thick_acrylic_top, &style_line_acrylic, 0);
-
+    /* Value label to the right, same position as bend angle label */
     thick_value_label = lv_label_create(parent);
-    lv_label_set_text(thick_value_label, "1/16 mm");
+    lv_label_set_text(thick_value_label, "1/16\"");
     lv_obj_add_style(thick_value_label, &style_title, 0);
-    lv_obj_align(thick_value_label, LV_ALIGN_RIGHT_MID, -10, 0);
+    lv_obj_align(thick_value_label, LV_ALIGN_CENTER, 60, 20);
 }
 
 /* intialize display screens */
@@ -476,17 +515,10 @@ int display_init(void)
     display_get_capabilities(display_dev, &caps);
     printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
-    /* encoder */
+    /* intialize encoder and buttons */
     encoder_init();
-    //buttons_init();
+    buttons_init();
 
-    /* buttons */
-    const struct device *btn_dev = DEVICE_DT_GET(DT_NODELABEL(buttons));
-    if (device_is_ready(btn_dev)) {
-        printk("Buttons: ready (PB15=forward, PB14=backward)\n");
-    } else {
-        printk("Buttons: NOT ready — check overlay gpio-keys node\n");
-    }
 
     init_styles();
     printk("LCD init: complete, returning %d\n", 0);
@@ -530,6 +562,8 @@ void bend_radius_screen(void)
     clear_screen();
     on_radius_screen = true;
 
+    make_label(lv_scr_act(), &style_note, "1 / 3",
+               LV_ALIGN_TOP_RIGHT, -10, 10);
     make_label(lv_scr_act(), &style_subtitle, "Set Bend Radius",
                LV_ALIGN_TOP_MID, 0, 20);
 
@@ -555,7 +589,7 @@ void bend_angle_input_screen(void)
     printk("display: bend angle input screen\n");
     clear_screen();
 
-    make_label(lv_scr_act(), &style_note, "1 / 3",
+    make_label(lv_scr_act(), &style_note, "2 / 3",
                LV_ALIGN_TOP_RIGHT, -10, 10);
     make_label(lv_scr_act(), &style_title, "Bend Angle",
                LV_ALIGN_CENTER, 60, -25);
@@ -590,15 +624,6 @@ void thickness_screen(void)
                "Hit " LV_SYMBOL_PREV " to return",
                LV_ALIGN_BOTTOM_MID, 0, -15);
 }
-
-typedef enum {
-    INPUT_STEP_BEND_RADIUS = 0,
-    INPUT_STEP_BEND_ANGLE,
-    INPUT_STEP_THICKNESS,
-    INPUT_STEP_COUNT
-} input_step_t;
-
-static input_step_t input_step = INPUT_STEP_BEND_RADIUS;
 
 static void input_show_step(input_step_t step)
 {
@@ -652,5 +677,12 @@ void display_create_home_screen(void) { direction_screen(); }
 
 void display_update(void)
 {
+    button_pressed();
+
+    if (thick_update_pending) {
+        thick_update_pending = false;
+        thick_anim_set(sel_thickness);
+    }
+
     lv_task_handler();
 }
