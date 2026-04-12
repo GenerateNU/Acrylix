@@ -2,7 +2,7 @@
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/display/panel.h>
 
-/* Use internal HSI — no external crystal on PCB */
+/* ── Clock — use internal HSI, no external crystal on PCB ── */
 &clk_hse {
     status = "disabled";
 };
@@ -16,49 +16,31 @@
     status = "okay";
 };
 
-/ {
-    /*buttons: buttons {
-        compatible = "gpio-keys";
-        btn_forward: btn_forward {
-            gpios = <&gpiob 10 (GPIO_ACTIVE_LOW)>;
-            zephyr,code = <INPUT_KEY_ENTER>;
-            label = "Forward";
-        };
-        btn_backward: btn_backward {
-            gpios = <&gpiob 15 (GPIO_ACTIVE_LOW)>;
-            zephyr,code = <INPUT_KEY_ESC>;
-            label = "Backward";
-        };
-    };*/
+/* ── Free button pins from conflicting peripherals ──────────
+ * PB10 = forward button  → also I2C2 SCL  → disable I2C2
+ * PB15 = backward button → also SPI2 MOSI → disable SPI2
+ * ─────────────────────────────────────────────────────────── */
+&i2c2 {
+    status = "disabled";
+};
 
-    /*encoder: encoder {
-        compatible = "gpio-qdec";
-        gpios = <&gpioa 0 (GPIO_ACTIVE_HIGH)>,
-                <&gpioa 1 (GPIO_ACTIVE_HIGH)>;
-        steps-per-period = <4>;
-        zephyr,axis = <INPUT_REL_X>;
-        sample-time-us = <2000>;
-        idle-timeout-ms = <200>;
-        idle-poll-time-us = <1000>;
-    };*/
+&spi2 {
+    status = "disabled";
+};
+
+/ {
+    /* Encoder (PC10/PC11) and buttons (PB10/PB15) are raw GPIO
+     * ISR in display.c — no gpio-keys or gpio-qdec nodes needed.
+     *
+     * LED removed — PA5 conflicts with SPI1 SCK (display clock).
+     * Add back once a free pin is confirmed on the PCB schematic. */
 
     chosen {
         zephyr,display = &ili9341;
     };
-
-    aliases {
-        led0 = &user_led;
-    };
-
-    leds {
-        compatible = "gpio-leds";
-        user_led: led_0 {
-            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>;
-            label = "User LED";
-        };
-    };
 };
 
+/* ── GPIO port enables ──────────────────────────────────── */
 &gpioa {
     status = "okay";
 };
@@ -71,6 +53,14 @@
     status = "okay";
 };
 
+/* ── SPI1 — ILI9341 display ─────────────────────────────────
+ * PA4 = CS
+ * PA5 = SCK   (spi1_sck_pa5)
+ * PA6 = MISO  (spi1_miso_pa6, unused — display is write-only)
+ * PA7 = MOSI  (spi1_mosi_pa7)
+ * PC6 = DC
+ * PC7 = RST
+ * ─────────────────────────────────────────────────────────── */
 &spi1 {
     status = "okay";
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
@@ -81,23 +71,23 @@
         compatible = "zephyr,mipi-dbi-spi";
         dc-gpios    = <&gpioc 6 GPIO_ACTIVE_HIGH>;
         reset-gpios = <&gpioc 7 GPIO_ACTIVE_LOW>;
-        spi-dev = <&spi1>;
+        spi-dev     = <&spi1>;
         write-only;
         #address-cells = <1>;
-        #size-cells = <0>;
+        #size-cells    = <0>;
 
         ili9341: ili9341@0 {
-            compatible = "ilitek,ili9340";
+            compatible        = "ilitek,ili9340";
             mipi-max-frequency = <25000000>;
-            reg = <0>;
-            width = <320>;
-            height = <240>;
-            pixel-format = <0>; /* 0=RGB565 */
-            rotation = <90>;
-            frmctr1 = [00 1b];
-            pwctrl1 = [26 00];
-            vmctrl1 = [31 3c];
-            vmctrl2 = [c0];
+            reg          = <0>;
+            width        = <320>;
+            height       = <240>;
+            pixel-format = <0>;    /* RGB565 */
+            rotation     = <90>;
+            frmctr1  = [00 1b];
+            pwctrl1  = [26 00];
+            vmctrl1  = [31 3c];
+            vmctrl2  = [c0];
             pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
             ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
         };

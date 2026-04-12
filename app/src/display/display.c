@@ -8,76 +8,70 @@
 #include <zephyr/logging/log.h>
 #include <lvgl.h>
 #include <stdio.h>
+#include <zephyr/irq.h>
+#include "../app_events.h"   /* event_post, g_inputs, system_event_t */
 
 LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 
-/* ── Bend animation geometry ── */
-#define ANIM_PIVOT_X   80
+/* ══════════════════════════════════════════════════════════════
+ *  Geometry constants
+ * ══════════════════════════════════════════════════════════════ */
+
+#define ANIM_PIVOT_X    80
 #define ANIM_PIVOT_Y   150
-#define ANIM_BAR_LEN   60
-#define ANIM_LAYER_GAP 6
+#define ANIM_BAR_LEN    60
+#define ANIM_LAYER_GAP   6
 
-#define DEBOUNCE_MS 300
+#define THICK_BASE_Y    155
+#define THICK_BAR_X      20
+#define THICK_BAR_X2    140
+#define THICK_ACRYLIC_Y 147
 
-/* ── Display device ── */
+#define DEBOUNCE_MS     250
+
+/* ══════════════════════════════════════════════════════════════
+ *  Device handles
+ * ══════════════════════════════════════════════════════════════ */
+
 static const struct device *display_dev;
 
-/* ── UI encoder state (PC10=A, PC11=B) ── */
+/* ══════════════════════════════════════════════════════════════
+ *  Encoder state  (PC10 = A, PC11 = B)
+ * ══════════════════════════════════════════════════════════════ */
+
 static const struct device  *gpioc;
 static volatile int32_t      enc_count = 0;
+static int                   enc_raw   = 0;
 static struct gpio_callback  enc_cb_data;
-static int position = 0;
-static int direction = 0;
-static K_MUTEX_DEFINE(encoder_mutex);
 
-/* ── Button state (PB10=forward, PB15=backward) ── */
+/* ══════════════════════════════════════════════════════════════
+ *  Button state  (PB10 = forward, PB15 = backward)
+ * ══════════════════════════════════════════════════════════════ */
+
 static const struct device  *gpiob;
 static struct gpio_callback  btn_fwd_cb_data;
 static struct gpio_callback  btn_bck_cb_data;
-static volatile bool btn_fwd_pressed = false;
-static volatile bool btn_bck_pressed = false;
+static volatile bool         btn_fwd_pressed = false;
+static volatile bool         btn_bck_pressed = false;
 
-/* ── UI elements ── */
-static lv_obj_t *bar;
-static bool on_radius_screen = false;
+/* ══════════════════════════════════════════════════════════════
+ *  Screen tracking
+ * ══════════════════════════════════════════════════════════════ */
 
-/* ── Bend animation elements ── */
-static lv_obj_t           *anim_fixed_bot;
-static lv_obj_t           *anim_fixed_top;
-static lv_obj_t           *anim_moving_bot;
-static lv_obj_t           *anim_moving_top;
-static lv_obj_t           *anim_value_label;
-static lv_point_t  anim_fixed_bot_pts[2];
-static lv_point_t  anim_fixed_top_pts[2];
-static lv_point_t  anim_moving_bot_pts[2];
-static lv_point_t  anim_moving_top_pts[2];
-static int                 sel_bend_angle = 0;
+typedef enum {
+    SM_SCREEN_DIRECTIONS = 0,
+    SM_SCREEN_INPUT,
+    SM_SCREEN_PROCESS,
+    SM_SCREEN_COMPLETE,
+    SM_SCREEN_ERROR
+} sm_screen_t;
 
-/* ── Thickness animation elements ── */
-static lv_obj_t           *thick_wood_bot;
-static lv_obj_t           *thick_wood_top;
-static lv_obj_t           *thick_acrylic_bot;
-static lv_obj_t           *thick_acrylic_top;
-static lv_obj_t           *thick_value_label;
-static lv_point_t  thick_wood_bot_pts[2];
-static lv_point_t  thick_wood_top_pts[2];
-static lv_point_t  thick_acrylic_bot_pts[2];
-static lv_point_t  thick_acrylic_top_pts[2];
-/* 0 = 1/16 mm, 1 = 1/8 mm */
-static int sel_thickness = 0;
-static lv_obj_t *thick_bar_line = NULL;
-static volatile bool thick_update_pending = false;
+static sm_screen_t current_sm_screen    = SM_SCREEN_DIRECTIONS;
+static bool        on_directions_screen = false;
 
-/* ── LVGL styles ── */
-static lv_style_t style_screen;
-static lv_style_t style_title;
-static lv_style_t style_subtitle;
-static lv_style_t style_body;
-static lv_style_t style_note;
-static lv_style_t style_line_acrylic;
-static lv_style_t style_line_wood;
-static bool styles_initialized = false;
-static bool line_styles_init   = false;
+/* ══════════════════════════════════════════════════════════════
+ *  Input step state
+ * ══════════════════════════════════════════════════════════════ */
 
 typedef enum {
     INPUT_STEP_BEND_RADIUS = 0,
@@ -86,9 +80,59 @@ typedef enum {
     INPUT_STEP_COUNT
 } input_step_t;
 
-static input_step_t input_step = INPUT_STEP_BEND_RADIUS;
+static input_step_t input_step     = INPUT_STEP_BEND_RADIUS;
+static int          sel_bend_angle = 0;
+static int          sel_thickness  = 0;   /* 0 = 1/16 in, 1 = 1/8 in */
 
-/* ── sin lookup table (scaled to 1000) for degrees ── */
+/* ══════════════════════════════════════════════════════════════
+ *  Bend animation elements
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_obj_t  *anim_fixed_bot;
+static lv_obj_t  *anim_fixed_top;
+static lv_obj_t  *anim_moving_bot;
+static lv_obj_t  *anim_moving_top;
+static lv_obj_t  *anim_value_label;
+static lv_point_t anim_fixed_bot_pts[2];
+static lv_point_t anim_fixed_top_pts[2];
+static lv_point_t anim_moving_bot_pts[2];
+static lv_point_t anim_moving_top_pts[2];
+
+/* ══════════════════════════════════════════════════════════════
+ *  Thickness animation elements
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_obj_t *thick_bar_line           = NULL;
+static lv_obj_t *thick_value_label        = NULL;
+static volatile bool thick_update_pending = false;
+
+/* ══════════════════════════════════════════════════════════════
+ *  Process screen elements
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_obj_t *process_value_label = NULL;
+static lv_obj_t *process_time_label  = NULL;
+static lv_obj_t *process_pct_label   = NULL;
+static lv_obj_t *bar                 = NULL;
+
+/* ══════════════════════════════════════════════════════════════
+ *  LVGL styles
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_style_t style_screen;
+static lv_style_t style_title;
+static lv_style_t style_subtitle;
+static lv_style_t style_body;
+static lv_style_t style_note;
+static lv_style_t style_line_acrylic;
+static lv_style_t style_line_wood;
+static bool       styles_initialized = false;
+static bool       line_styles_init   = false;
+
+/* ══════════════════════════════════════════════════════════════
+ *  Sin lookup table (scaled x1000, 0-90 degrees)
+ * ══════════════════════════════════════════════════════════════ */
+
 static const int16_t sin_lut[91] = {
        0,  17,  35,  52,  70,  87, 105, 122, 139, 156,
      174, 191, 208, 225, 242, 259, 276, 292, 309, 326,
@@ -103,13 +147,20 @@ static const int16_t sin_lut[91] = {
 };
 #define COS_LUT(a) sin_lut[90 - (a)]
 
-static void bend_anim_set_angle(int angle_deg);   /* forward declaration */
-static void thick_anim_set(int idx);              /* forward declaration */
+/* ══════════════════════════════════════════════════════════════
+ *  Forward declarations
+ * ══════════════════════════════════════════════════════════════ */
+
+static void bend_anim_set_angle(int angle_deg);
+static void thick_anim_set(int idx);
+static void direction_screen(void);
+static void process_screen(const char *header, const char *value);
 int input_selection_next(void);
 int input_selection_prev(void);
 
-/* ── UI encoder ISR — PC11 triggers on both edges ── */
-static int enc_raw = 0;
+/* ══════════════════════════════════════════════════════════════
+ *  Encoder ISR  — PC11 falling edge
+ * ══════════════════════════════════════════════════════════════ */
 
 static void enc_isr(const struct device *dev, struct gpio_callback *cb,
                     uint32_t pins)
@@ -123,11 +174,9 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
         enc_raw--;
     }
 
-    /* Only update every 2 raw pulses — adjust to 1, 2, or 4 to match detent feel */
     int new_count = enc_raw / 2;
-    if (new_count == enc_count) {
-        return;
-    }
+    if (new_count == enc_count) return;
+
     int delta = (new_count > enc_count) ? 1 : -1;
     enc_count = new_count;
 
@@ -141,17 +190,14 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
         return;
     }
 
-    /* Thickness screen — toggle between 1/16 and 1/8 on any encoder movement */
+    /* Thickness screen */
     if (thick_bar_line != NULL) {
         sel_thickness ^= 1;
         thick_update_pending = true;
-        printk("Thickness toggled: %s\n", sel_thickness == 1 ? "1/8 in" : "1/16 in");
+        printk("Thickness toggled: %s\n",
+               sel_thickness == 1 ? "1/8 in" : "1/16 in");
         return;
     }
-
-    position += delta;
-    direction = delta;
-    printk("Encoder position: %d direction: %d\n", position, direction);
 }
 
 void encoder_init(void)
@@ -166,23 +212,32 @@ void encoder_init(void)
     gpio_pin_interrupt_configure(gpioc, 11, GPIO_INT_EDGE_FALLING);
     gpio_init_callback(&enc_cb_data, enc_isr, BIT(11));
     gpio_add_callback(gpioc, &enc_cb_data);
-    printk("Encoder: init (PC10=A, PC11=B, IRQ on PC11/EXTI11)\n");
+    printk("Encoder: init (PC10=A, PC11=B, IRQ on PC11)\n");
 }
+
+/* ══════════════════════════════════════════════════════════════
+ *  Button ISRs — flags only, LVGL touched in display_update
+ * ══════════════════════════════════════════════════════════════ */
 
 static void btn_fwd_isr(const struct device *dev, struct gpio_callback *cb,
                          uint32_t pins)
 {
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
+
+    /* Only act on falling edge (button press, active low) */
+    if (gpio_pin_get(gpiob, 10) != 0) {
+        return;   /* rising edge — button release, ignore */
+    }
+
+    /* Debounce — ignore if too soon after last press */
     if ((now - last_press) < DEBOUNCE_MS) {
         return;
     }
     last_press = now;
 
-    if (gpio_pin_get(gpiob, 10) == 0) {
-        printk("=== FORWARD button pressed (step %d) ===\n", input_step);
-        btn_fwd_pressed = true;
-    }
+    printk("=== FORWARD pressed (step %d) ===\n", input_step);
+    btn_fwd_pressed = true;
 }
 
 static void btn_bck_isr(const struct device *dev, struct gpio_callback *cb,
@@ -190,15 +245,18 @@ static void btn_bck_isr(const struct device *dev, struct gpio_callback *cb,
 {
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
+
+    if (gpio_pin_get(gpiob, 15) != 0) {
+        return;
+    }
+
     if ((now - last_press) < DEBOUNCE_MS) {
         return;
     }
     last_press = now;
 
-    if (gpio_pin_get(gpiob, 15) == 0) {
-        printk("=== BACK button pressed (step %d) ===\n", input_step);
-        btn_bck_pressed = true;
-    }
+    printk("=== BACK pressed (step %d) ===\n", input_step);
+    btn_bck_pressed = true;
 }
 
 void buttons_init(void)
@@ -208,30 +266,52 @@ void buttons_init(void)
         printk("GPIOB not ready\n");
         return;
     }
-    gpio_pin_configure(gpiob, 10, GPIO_INPUT);   //forward
-    gpio_pin_configure(gpiob, 15, GPIO_INPUT);   //backward
-
-    gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_FALLING);
-    gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_FALLING);
-
+    gpio_pin_configure(gpiob, 10, GPIO_INPUT);
+    gpio_pin_configure(gpiob, 15, GPIO_INPUT);
+    gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_BOTH);
+    gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_BOTH);
     gpio_init_callback(&btn_fwd_cb_data, btn_fwd_isr, BIT(10));
     gpio_init_callback(&btn_bck_cb_data, btn_bck_isr, BIT(15));
-
     gpio_add_callback(gpiob, &btn_fwd_cb_data);
     gpio_add_callback(gpiob, &btn_bck_cb_data);
 
+    z_arm_irq_priority_set(EXTI15_10_IRQn, 1, 0);
     printk("Buttons: init (PB10=forward, PB15=backward)\n");
 }
 
-void button_pressed(void)
+/* ══════════════════════════════════════════════════════════════
+ *  Button flag handler — called from display_update
+ * ══════════════════════════════════════════════════════════════ */
+
+static void button_pressed(void)
 {
     if (btn_fwd_pressed) {
         btn_fwd_pressed = false;
-        printk("=== FORWARD button pressed (step %d -> %d) ===\n",
-               input_step, input_step + 1);
+
+        /* Directions screen -> enter input selection */
+        if (on_directions_screen) {
+            printk(">>> Forward from directions\n");
+            event_post(EVT_START_INIT);
+            return;
+        }
+
+        /* Complete screen -> restart */
+        if (current_sm_screen == SM_SCREEN_COMPLETE) {
+            printk(">>> Forward from complete — restarting\n");
+            event_post(EVT_START_IDLE);
+            return;
+        }
+
+        /* Input selection screens */
+        printk(">>> Forward (step %d -> %d)\n", input_step, input_step + 1);
         int ret = input_selection_next();
         if (ret == 1) {
-            printk(">>> All inputs confirmed, ready to bend\n");
+            printk(">>> Inputs confirmed: angle=%d deg thickness=%s\n",
+                   sel_bend_angle,
+                   sel_thickness == 1 ? "1/8 in" : "1/16 in");
+            g_inputs.bend_angle = sel_bend_angle;
+            g_inputs.thickness  = sel_thickness;
+            event_post(EVT_START_BEND);
         } else {
             printk(">>> Advanced to step %d\n", input_step);
         }
@@ -239,20 +319,28 @@ void button_pressed(void)
 
     if (btn_bck_pressed) {
         btn_bck_pressed = false;
-        printk("=== BACK button pressed (step %d -> %d) ===\n",
-               input_step, input_step - 1);
+
+        if (on_directions_screen || current_sm_screen == SM_SCREEN_COMPLETE) {
+            return;
+        }
+
+        printk(">>> Back (step %d -> %d)\n", input_step, input_step - 1);
         int ret = input_selection_prev();
         if (ret == -1) {
-            printk(">>> Cancelled — returning to directions screen\n");
+            printk(">>> Cancelled — back to directions\n");
             direction_screen();
         } else {
             printk(">>> Returned to step %d\n", input_step);
         }
     }
 }
+
+/* ══════════════════════════════════════════════════════════════
+ *  Screen element cleanup
+ * ══════════════════════════════════════════════════════════════ */
+
 K_TIMER_DEFINE(bend_anim_timer, NULL, NULL);
 
-/* bend angle clear screen */
 static void bend_angle_input_screen_exit(void)
 {
     k_timer_stop(&bend_anim_timer);
@@ -263,18 +351,16 @@ static void bend_angle_input_screen_exit(void)
     anim_value_label = NULL;
 }
 
-/* thickness clear screen */
 static void thick_anim_clear(void)
 {
-    thick_wood_bot    = NULL;
-    thick_wood_top    = NULL;
-    thick_acrylic_bot = NULL;
-    thick_acrylic_top = NULL;
-    thick_value_label = NULL;
     thick_bar_line    = NULL;
+    thick_value_label = NULL;
 }
 
-/* intialize UI styles */
+/* ══════════════════════════════════════════════════════════════
+ *  Style init
+ * ══════════════════════════════════════════════════════════════ */
+
 static void init_styles(void)
 {
     if (styles_initialized) return;
@@ -296,7 +382,7 @@ static void init_styles(void)
     lv_style_set_text_font(&style_body, &lv_font_montserrat_14);
 
     lv_style_init(&style_note);
-    lv_style_set_text_color(&style_note, lv_color_white());
+    lv_style_set_text_color(&style_note, lv_color_hex(0xAAAAAA));
     lv_style_set_text_font(&style_note, &lv_font_montserrat_12);
 
     styles_initialized = true;
@@ -319,16 +405,26 @@ static void init_line_styles(void)
     line_styles_init = true;
 }
 
-/* clear screen function */
+/* ══════════════════════════════════════════════════════════════
+ *  Screen clear
+ * ══════════════════════════════════════════════════════════════ */
+
 static void clear_screen(void)
 {
     bend_angle_input_screen_exit();
     thick_anim_clear();
-    bar = NULL;
-    on_radius_screen = false;
+    bar                  = NULL;
+    process_value_label  = NULL;
+    process_time_label   = NULL;
+    process_pct_label    = NULL;
+    on_directions_screen = false;
     lv_obj_clean(lv_scr_act());
     lv_obj_add_style(lv_scr_act(), &style_screen, 0);
 }
+
+/* ══════════════════════════════════════════════════════════════
+ *  Label helper
+ * ══════════════════════════════════════════════════════════════ */
 
 static lv_obj_t *make_label(lv_obj_t *parent,
                              lv_style_t *style,
@@ -344,13 +440,16 @@ static lv_obj_t *make_label(lv_obj_t *parent,
     return lbl;
 }
 
-/* encoder API */
+/* ══════════════════════════════════════════════════════════════
+ *  Encoder public API
+ * ══════════════════════════════════════════════════════════════ */
 
-int encoder_get_position(void) { return (int)enc_count; }
-
+int encoder_get_position(void)  { return (int)enc_count; }
 int encoder_get_direction(void) { return 0; }
 
-/* bend angle animation */
+/* ══════════════════════════════════════════════════════════════
+ *  Bend animation
+ * ══════════════════════════════════════════════════════════════ */
 
 static void bend_anim_set_angle(int angle_deg)
 {
@@ -437,17 +536,17 @@ static void bend_anim_create(lv_obj_t *parent)
     lv_obj_align(anim_value_label, LV_ALIGN_CENTER, 60, 20);
 }
 
-/* thickness animation */
+/* ══════════════════════════════════════════════════════════════
+ *  Thickness animation
+ * ══════════════════════════════════════════════════════════════ */
+
 static void thick_anim_set(int idx)
 {
     if (thick_bar_line == NULL) return;
-
-    /* Thicker line sits higher to grow upward from the gray base */
     lv_obj_set_style_line_width(thick_bar_line,
                                 (idx == 1) ? 10 : 4,
                                 LV_PART_MAIN);
     lv_obj_invalidate(thick_bar_line);
-
     if (thick_value_label != NULL) {
         lv_label_set_text(thick_value_label,
                           (idx == 1) ? "1/8 in" : "1/16 in");
@@ -459,10 +558,9 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    /* Gray base bar — fixed, same style as bend angle wood bar */
     static lv_point_t base_pts[2] = {
-        {20, 155},
-        {140, 155}
+        {THICK_BAR_X, THICK_BASE_Y},
+        {THICK_BAR_X2, THICK_BASE_Y}
     };
     lv_obj_t *base_bar = lv_line_create(parent);
     lv_line_set_points(base_bar, base_pts, 2);
@@ -470,10 +568,9 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    /* White acrylic bar — sits on top of gray bar, changes thickness */
     static lv_point_t acrylic_pts[2] = {
-        {20, 147},
-        {140, 147}
+        {THICK_BAR_X, THICK_ACRYLIC_Y},
+        {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
     thick_bar_line = lv_line_create(parent);
     lv_line_set_points(thick_bar_line, acrylic_pts, 2);
@@ -481,33 +578,32 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(thick_bar_line, 4, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(thick_bar_line, true, LV_PART_MAIN);
 
-    /* Value label to the right, same position as bend angle label */
     thick_value_label = lv_label_create(parent);
-    lv_label_set_text(thick_value_label, "1/16\"");
+    lv_label_set_text(thick_value_label, "1/16 in");
     lv_obj_add_style(thick_value_label, &style_title, 0);
     lv_obj_align(thick_value_label, LV_ALIGN_CENTER, 60, 20);
 }
 
-/* intialize display screens */
+/* ══════════════════════════════════════════════════════════════
+ *  Display init
+ * ══════════════════════════════════════════════════════════════ */
 
 int display_init(void)
 {
     printk("LCD init: starting\n");
 
+    lv_init();
+
     const struct device *spi_dev = DEVICE_DT_GET(DT_NODELABEL(spi1));
-    printk("LCD init: SPI device get: %p\n", (void *)spi_dev);
     printk("LCD init: SPI ready: %d\n", device_is_ready(spi_dev));
 
     display_dev = DEVICE_DT_GET(DT_NODELABEL(ili9341));
-    printk("LCD init: display device get: %p\n", (void *)display_dev);
     printk("LCD init: display ready: %d\n", device_is_ready(display_dev));
     if (!device_is_ready(display_dev)) {
         printk("Display not ready\n");
-        printk("LCD init: complete, returning %d\n", -1);
         return -1;
     }
 
-    printk("LCD init: calling blanking off\n");
     int ret = display_blanking_off(display_dev);
     printk("LCD init: blanking off returned %d\n", ret);
 
@@ -515,24 +611,29 @@ int display_init(void)
     display_get_capabilities(display_dev, &caps);
     printk("Display ready: %dx%d\n", caps.x_resolution, caps.y_resolution);
 
-    /* intialize encoder and buttons */
     encoder_init();
     buttons_init();
-
-
     init_styles();
-    printk("LCD init: complete, returning %d\n", 0);
+
+    direction_screen();
+
+    printk("LCD init: complete\n");
     return 0;
 }
 
-/* SCREEN 1 — direction */
-void direction_screen(void)
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN 1 — Directions  (STATE_IDLE)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void direction_screen(void)
 {
     printk("display: directions screen\n");
     clear_screen();
+    current_sm_screen    = SM_SCREEN_DIRECTIONS;
+    on_directions_screen = true;
 
     make_label(lv_scr_act(), &style_subtitle, "Directions:",
-               LV_ALIGN_TOP_LEFT, 30, 20);
+               LV_ALIGN_TOP_LEFT, 20, 7);
 
     lv_obj_t *steps = lv_label_create(lv_scr_act());
     lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
@@ -549,18 +650,20 @@ void direction_screen(void)
     lv_obj_t *estop = lv_label_create(lv_scr_act());
     lv_label_set_long_mode(estop, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(estop, lv_pct(100));
-    lv_label_set_text(estop,
-        "* E-stop on right side of machine for emergency");
-    lv_obj_add_style(estop, &style_note, 0);
-    lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -18);
+    lv_label_set_text(estop, "* E-stop on right side of machine for emergency");
+    lv_obj_add_style(estop, &style_body, 0);
+    lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -2);
 }
 
-/* SCREEN 2 — BEND RADIUS REMINDER */
-void bend_radius_screen(void)
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN 2 — Input selection  (STATE_INITIALIZATION)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void bend_radius_screen(void)
 {
     printk("display: bend radius screen\n");
     clear_screen();
-    on_radius_screen = true;
+    current_sm_screen = SM_SCREEN_INPUT;
 
     make_label(lv_scr_act(), &style_note, "1 / 3",
                LV_ALIGN_TOP_RIGHT, -10, 10);
@@ -575,19 +678,19 @@ void bend_radius_screen(void)
         "Before proceeding, manually adjust the bend radius knob (2) "
         "to your desired radius and tighten the locking nuts to secure it.");
     lv_obj_add_style(msg, &style_body, 0);
-    lv_obj_align(msg, LV_ALIGN_CENTER, 0, -10);
+    lv_obj_align(msg, LV_ALIGN_CENTER, 0, 0);
 
-    make_label(lv_scr_act(), &style_note,
+    make_label(lv_scr_act(), &style_body,
                "Hit " LV_SYMBOL_PLAY " when ready\n"
                "Hit " LV_SYMBOL_PREV " to return",
                LV_ALIGN_BOTTOM_MID, 0, -15);
 }
 
-/* SCREEN 3 — bend angle input */
-void bend_angle_input_screen(void)
+static void bend_angle_input_screen(void)
 {
     printk("display: bend angle input screen\n");
     clear_screen();
+    current_sm_screen = SM_SCREEN_INPUT;
 
     make_label(lv_scr_act(), &style_note, "2 / 3",
                LV_ALIGN_TOP_RIGHT, -10, 10);
@@ -605,11 +708,11 @@ void bend_angle_input_screen(void)
     bend_anim_set_angle(0);
 }
 
-/* SCREEN 4 — acrylic thickness selection */
-void thickness_screen(void)
+static void thickness_screen(void)
 {
     printk("display: thickness screen\n");
     clear_screen();
+    current_sm_screen = SM_SCREEN_INPUT;
 
     make_label(lv_scr_act(), &style_note, "3 / 3",
                LV_ALIGN_TOP_RIGHT, -10, 10);
@@ -628,23 +731,19 @@ void thickness_screen(void)
 static void input_show_step(input_step_t step)
 {
     switch (step) {
-    case INPUT_STEP_BEND_RADIUS:
-        bend_radius_screen();
-        break;
-    case INPUT_STEP_BEND_ANGLE:
-        bend_angle_input_screen();
-        break;
-    case INPUT_STEP_THICKNESS:
-        thickness_screen();
-        break;
-    default:
-        break;
+    case INPUT_STEP_BEND_RADIUS: bend_radius_screen();      break;
+    case INPUT_STEP_BEND_ANGLE:  bend_angle_input_screen(); break;
+    case INPUT_STEP_THICKNESS:   thickness_screen();        break;
+    default: break;
     }
 }
 
-void input_selection_enter(void)
+static void input_selection_enter(void)
 {
-    input_step = INPUT_STEP_BEND_RADIUS;
+    printk("display: entering input selection\n");
+    input_step     = INPUT_STEP_BEND_RADIUS;
+    sel_bend_angle = 0;
+    sel_thickness  = 0;
     input_show_step(input_step);
 }
 
@@ -655,9 +754,8 @@ int input_selection_next(void)
         input_show_step(input_step);
         return 0;
     }
-    /* Last step confirmed */
-    printk("Input confirmed — bend angle: %d deg, thickness: %s\n",
-           sel_bend_angle, sel_thickness == 1 ? "1/8 mm" : "1/16 mm");
+    printk("Input confirmed — angle: %d deg, thickness: %s\n",
+           sel_bend_angle, sel_thickness == 1 ? "1/8 in" : "1/16 in");
     return 1;
 }
 
@@ -668,12 +766,135 @@ int input_selection_prev(void)
         input_show_step(input_step);
         return 0;
     }
-    /* First step — signal exit to state machine */
     printk("Input cancelled\n");
     return -1;
 }
 
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN 3 — Process  (STATE_BEND / STATE_COOL)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void process_screen(const char *header, const char *value)
+{
+    printk("display: process screen (%s)\n", header);
+    clear_screen();
+    current_sm_screen = SM_SCREEN_PROCESS;
+
+    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_CENTER, 0, -50);
+
+    process_value_label = make_label(lv_scr_act(), &style_title, value,
+                                     LV_ALIGN_CENTER, 0, -15);
+
+    process_time_label = make_label(lv_scr_act(), &style_subtitle,
+                                    "time remaining --:--",
+                                    LV_ALIGN_CENTER, 0, 20);
+
+    bar = lv_bar_create(lv_scr_act());
+    lv_obj_set_size(bar, 200, 20);
+    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 50);
+    lv_bar_set_range(bar, 0, 100);
+    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+
+    /* Gray background track */
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x444444), LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
+    lv_obj_set_style_radius(bar, 4, LV_PART_MAIN);
+    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
+
+    /* Green fill indicator */
+    lv_obj_set_style_bg_color(bar, lv_color_hex(0x00AA00), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
+    lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+
+    process_pct_label = make_label(lv_scr_act(), &style_body, "0%",
+                                   LV_ALIGN_CENTER, 0, 75);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN 4 — Complete  (STATE_COMPLETE)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void complete_screen(void)
+{
+    printk("display: complete screen\n");
+    clear_screen();
+    current_sm_screen = SM_SCREEN_COMPLETE;
+
+    make_label(lv_scr_act(), &style_title, "Done!",
+               LV_ALIGN_CENTER, 0, -20);
+    make_label(lv_scr_act(), &style_body, "Safe to remove acrylic.",
+               LV_ALIGN_CENTER, 0, 15);
+    make_label(lv_scr_act(), &style_note,
+               "Hit " LV_SYMBOL_PLAY " to start again",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN 5 — Error  (STATE_ERROR)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void error_screen(const char *msg)
+{
+    printk("display: error screen\n");
+    clear_screen();
+    current_sm_screen = SM_SCREEN_ERROR;
+
+    lv_obj_t *lbl = make_label(lv_scr_act(), &style_title, "ERROR",
+                                LV_ALIGN_CENTER, 0, -30);
+    lv_obj_set_style_text_color(lbl, lv_color_hex(0xFF4444), LV_PART_MAIN);
+
+    make_label(lv_scr_act(), &style_body, msg,
+               LV_ALIGN_CENTER, 0, 10);
+    make_label(lv_scr_act(), &style_note,
+               "Check machine and reset",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  Public screen API
+ * ══════════════════════════════════════════════════════════════ */
+
 void display_create_home_screen(void) { direction_screen(); }
+
+void display_set_state(int state)
+{
+    switch (state) {
+        case STATE_IDLE:           direction_screen();                 break;
+        case STATE_INITIALIZATION: input_selection_enter();            break;
+        case STATE_BEND:           process_screen("Heating...", "");   break;
+        case STATE_COOL:           process_screen("Cooling...", "");   break;
+        case STATE_COMPLETE:       complete_screen();                  break;
+        case STATE_ERROR:          error_screen("An error occurred."); break;
+        case 7:                    process_screen("Bending...", "");   break;
+        default: break;
+    }
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  Live data update API
+ * ══════════════════════════════════════════════════════════════ */
+
+void display_update_value(const char *value)
+{
+    if (process_value_label != NULL)
+        lv_label_set_text(process_value_label, value);
+}
+
+void display_update_progress(int pct, int min, int sec)
+{
+    if (bar == NULL) return;
+    char time_buf[32];
+    char pct_buf[8];
+    snprintf(time_buf, sizeof(time_buf), "time remaining %02d:%02d", min, sec);
+    snprintf(pct_buf,  sizeof(pct_buf),  "%d%%", pct);
+    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    if (process_time_label != NULL) lv_label_set_text(process_time_label, time_buf);
+    if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  Periodic update — call every ~10 ms from display thread
+ * ══════════════════════════════════════════════════════════════ */
 
 void display_update(void)
 {
