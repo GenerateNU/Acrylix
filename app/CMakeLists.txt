@@ -17,4 +17,5 @@ target_sources(app PRIVATE
 	src/temp/temp.c
 	src/temp/temp_sensor.c
 	src/temp/temp_control.c
-	src/states/states.c)
+	src/states/states.c
+	src/stepper/limit_sw.c)

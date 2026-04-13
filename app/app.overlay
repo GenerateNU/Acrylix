@@ -151,3 +151,23 @@
         zephyr,resolution = <12>;
     };
 };
+
+/* Disable HSE - no external crystal on custom hardware */
+&clk_hse {
+    status = "disabled";
+};
+
+/* Enable internal HSI (16MHz) */
+&clk_hsi {
+    status = "okay";
+};
+
+/* Reconfigure PLL to use HSI instead of HSE */
+&pll {
+    div-m = <16>;
+    mul-n = <192>;
+    div-p = <2>;
+    div-q = <4>;
+    clocks = <&clk_hsi>;
+    status = "okay";
+};
