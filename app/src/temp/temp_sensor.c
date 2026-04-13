@@ -10,10 +10,7 @@
 
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/adc.h>
-#include <zephyr/logging/log.h>
 #include "temp_sensor.h"
-
-LOG_MODULE_REGISTER(temp_sensor, LOG_LEVEL_INF);
 
 static float ema_temp = -999.0f;  /* uninitialized sentinel */
 #define EMA_ALPHA 0.2f            /* 0.0 = no update, 1.0 = no filter */
@@ -41,13 +38,13 @@ static void temp_sensor_thread(void *a, void *b, void *c)
     ARG_UNUSED(a); ARG_UNUSED(b); ARG_UNUSED(c);
 
     if (!device_is_ready(adc_dev)) {
-        LOG_ERR("ADC1 not ready");
+        printk("ERR: ADC1 not ready\n");
         return;
     }
 
     int err = adc_channel_setup(adc_dev, &ch15_cfg);
     if (err) {
-        LOG_ERR("ADC channel setup failed: %d", err);
+        printk("ERR: ADC channel setup failed: %d\n", err);
         return;
     }
 
@@ -69,7 +66,7 @@ static void temp_sensor_thread(void *a, void *b, void *c)
         }
 
         if (valid == 0) {
-            LOG_ERR("All ADC reads failed");
+            printk("ERR: All ADC reads failed\n");
         } else {
             int avg = sum / valid;
             float V = avg * 3.3f / 4095.0f;
@@ -82,8 +79,8 @@ static void temp_sensor_thread(void *a, void *b, void *c)
                 ema_temp = EMA_ALPHA * T + (1.0f - EMA_ALPHA) * ema_temp;
             }
 
-            LOG_INF("ADC avg=%d min=%d max=%d (spread=%d)", avg, mn, mx, mx - mn);
-            LOG_INF("T_raw=%.1f T_ema=%.1f C", (double)T, (double)ema_temp);
+            printk("ADC avg=%d min=%d max=%d (spread=%d)\n", avg, mn, mx, mx - mn);
+            printk("T_raw=%.1f T_ema=%.1f C\n", (double)T, (double)ema_temp);
         }
 
         k_sleep(K_SECONDS(1));

@@ -1,13 +1,10 @@
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
 #include <zephyr/drivers/gpio.h>
 #include "temp/temp_control.h"
 
-LOG_MODULE_REGISTER(main, LOG_LEVEL_INF);
-
 int main(void)
 {
-    LOG_INF("=== AcrylicBender boot ===");
+    printk("=== AcrylicBender boot ===\n");
 
     temp_init();
     heater_start();
@@ -18,11 +15,11 @@ int main(void)
 
     // while (1) {
     //     gpio_pin_set(gpioc, 9, 1);
-    //     LOG_INF("SSR ON");
+    //     printk("SSR ON\n");
     //     k_sleep(K_SECONDS(2));
 
     //     gpio_pin_set(gpioc, 9, 0);
-    //     LOG_INF("SSR OFF");
+    //     printk("SSR OFF\n");
     //     k_sleep(K_SECONDS(2));
     // }
 

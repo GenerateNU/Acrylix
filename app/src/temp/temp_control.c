@@ -1,10 +1,7 @@
 #include <zephyr/kernel.h>
-#include <zephyr/logging/log.h>
 #include "temp_control.h"
 #include "temp_sensor.h"
-#include "../ssr.h"
-
-LOG_MODULE_REGISTER(temp_control, LOG_LEVEL_INF);
+#include "ssr.h"
 
 /* ── PI controller ────────────────────────────────────────────────────────── */
 #define KP           0.5
@@ -48,7 +45,7 @@ static void heater_thread(void *a, void *b, void *c)
     while (temp_get_ema() < -900.0f) {
         k_sleep(K_MSEC(100));
     }
-    LOG_INF("EMA valid — starting PI control");
+    printk("EMA valid — starting PI control\n");
 
     while (1) {
         float measured  = temp_get_ema();
@@ -56,9 +53,9 @@ static void heater_thread(void *a, void *b, void *c)
         bool heater_on  = (pi_out > 0.5);
 
         ssr_set(heater_on);
-        LOG_INF("T=%.1f setpoint=%.1f PI=%.1f SSR=%s",
-                (double)measured, setpoint, pi_out,
-                heater_on ? "ON" : "OFF");
+        printk("T=%.1f setpoint=%.1f PI=%.1f SSR=%s\n",
+               (double)measured, setpoint, pi_out,
+               heater_on ? "ON" : "OFF");
 
         k_sleep(K_SECONDS(1));
     }
@@ -70,14 +67,14 @@ void heater_start(void)
 {
     integral_term = 0.0;  /* reset integrator to prevent windup on restart */
     k_thread_resume(heater_tid);
-    LOG_INF("Heater started (setpoint=%.1f C)", setpoint);
+    printk("Heater started (setpoint=%.1f C)\n", setpoint);
 }
 
 void heater_stop(void)
 {
     k_thread_suspend(heater_tid);
     ssr_set(false);
-    LOG_INF("Heater stopped");
+    printk("Heater stopped\n");
 }
 
 void temp_init(void)

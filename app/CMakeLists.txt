@@ -10,7 +10,7 @@ project(app)
 
 target_sources(app PRIVATE
 	src/main.c
-	src/ssr.c
+	src/temp/ssr.c
 	src/display/display.c
 	src/stepper/drv8452_spi.c
 	src/stepper/stepper.c
