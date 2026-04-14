@@ -1,10 +1,42 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
-#include <zephyr/dt-bindings/display/panel.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
 #include <zephyr/dt-bindings/pwm/pwm.h>
 #include <zephyr/dt-bindings/adc/adc.h>
+#include <zephyr/dt-bindings/display/panel.h>
+
+/* ── Clock — use internal HSI, no external crystal on PCB ── */
+&clk_hse {
+    status = "disabled";
+};
+
+&pll {
+    clocks = <&clk_hsi>;
+    div-m = <16>;
+    mul-n = <192>;
+    div-p = <2>;
+    div-q = <4>;
+    status = "okay";
+};
+
+/* ── Free button pins from conflicting peripherals ──────────
+ * PB10 = forward button  → also I2C2 SCL  → disable I2C2
+ * PB15 = backward button → also SPI2 MOSI → disable SPI2
+ * ─────────────────────────────────────────────────────────── */
+&i2c2 {
+    status = "disabled";
+};
+
+&spi2 {
+    status = "disabled";
+};
 
 / {
+    /* Encoder (PC10/PC11) and buttons (PB10/PB15) are raw GPIO
+     * ISR in display.c — no gpio-keys or gpio-qdec nodes needed.
+     *
+     * LED removed — PA5 conflicts with SPI1 SCK (display clock).
+     * Add back once a free pin is confirmed on the PCB schematic. */
+
     chosen {
         zephyr,display = &ili9341;
     };
@@ -119,7 +151,33 @@
     status = "okay";
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
     pinctrl-names = "default";
-    cs-gpios = <&gpiob 6 GPIO_ACTIVE_LOW>;  /* VERIFY CS pin against schematic */
+    cs-gpios = <&gpioa 4 GPIO_ACTIVE_LOW>;
+
+    mipi_dbi: mipi-dbi-spi {
+        compatible = "zephyr,mipi-dbi-spi";
+        dc-gpios    = <&gpioc 6 GPIO_ACTIVE_HIGH>;
+        reset-gpios = <&gpioc 7 GPIO_ACTIVE_LOW>;
+        spi-dev     = <&spi1>;
+        write-only;
+        #address-cells = <1>;
+        #size-cells    = <0>;
+
+        ili9341: ili9341@0 {
+            compatible        = "ilitek,ili9340";
+            mipi-max-frequency = <25000000>;
+            reg          = <0>;
+            width        = <320>;
+            height       = <240>;
+            pixel-format = <0>;    /* RGB565 */
+            rotation     = <90>;
+            frmctr1  = [00 1b];
+            pwctrl1  = [26 00];
+            vmctrl1  = [31 3c];
+            vmctrl2  = [c0];
+            pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
+            ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
+        };
+    };
 };
 
 /* SPI2 hardware node DISABLED — top-row J502 traces (PB12-PB15) confirmed

@@ -45,14 +45,13 @@ west flash
 
 - **MCU:** STM32F446RET6 (LQFP64), 180 MHz, Cortex-M4F
 - **Debug/Flash:** SWD via ST-LINK/V2 (SWDIO/SWDCLK + nRST); supports breakpoints, variable watching, and optional SWO trace
-- **Display:** Adafruit 2.8"/3.2" ILI9341 TFT touchscreen over SPI2
-- **User input:** PEC11R incremental rotary encoder (user input dial)
+- **Display:** Adafruit 2.8"/3.2" ILI9341 TFT touchscreen over SPI1 (CS=PA4, CLK=PA5, MISO=PA6, MOSI=PA7, DC=PC6, RST=PC7)
+- **User input:** PEC11R incremental rotary encoder (UI dial) — ENC_A=PC10, ENC_B=PC11; FORWARD_BTN=PA8 (active low), BACK_BTN=PA9 (active low)
 - **Stepper motors:** 1x NEMA 23 (OMC 23HS22-4004-ME1K, 4A/phase) driven by DRV8452 in hardware interface mode (no SPI); current set via VREF resistor divider (R1=10kΩ, R2=56kΩ, ~3.2A peak)
 - **Heating:** AC heater switched via SSR-25DA solid state relay; PWM control on PA8 (TIM1_CH1)
 - **Temperature sensing:** PT1000 RTD (NB-PTCO-006) via voltage divider → PC0 (ADC1_IN6)
-- **Encoders:**
-  - Differential quadrature encoders on two motors via AM26C32 line receivers → TIM4 (PB6/PB7) and TIM8 (PC6/PC7)
-  - AS5600 absolute magnetic encoder (bend angle feedback) on I2C → PB10/PB11
+- **Motor position encoders (not UI):** PA0=ENC_A_OUT, PA1=ENC_B_OUT, PA2=ENC_Z_OUT — differential quadrature via AM26C32 line receivers → TIM4 (PB6/PB7) and TIM8 (PC6/PC7); do not use these pins for UI input
+- **Bend angle feedback:** AS5600 absolute magnetic encoder on I2C → PB10/PB11
 - **Power:** 24V input → 5.5V buck → 5V LDO → 3.3V LDO
 
 ## Software Components
