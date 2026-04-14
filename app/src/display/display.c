@@ -36,6 +36,17 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 static const struct device *display_dev;
 
 /* ══════════════════════════════════════════════════════════════
+ *  Bend progress mailbox (separate from g_progress in app_events.h)
+ *  Written by state thread via display_post_bend_progress(),
+ *  consumed by display thread in display_update().
+ * ══════════════════════════════════════════════════════════════ */
+
+static struct {
+    volatile bool pending;
+    float fraction;
+} g_bend_progress;
+
+/* ══════════════════════════════════════════════════════════════
  *  Encoder state  (PC10 = A, PC11 = B)
  * ══════════════════════════════════════════════════════════════ */
 
@@ -93,10 +104,10 @@ static lv_obj_t  *anim_fixed_top;
 static lv_obj_t  *anim_moving_bot;
 static lv_obj_t  *anim_moving_top;
 static lv_obj_t  *anim_value_label;
-static lv_point_precise_t anim_fixed_bot_pts[2];
-static lv_point_precise_t anim_fixed_top_pts[2];
-static lv_point_precise_t anim_moving_bot_pts[2];
-static lv_point_precise_t anim_moving_top_pts[2];
+static lv_point_t anim_fixed_bot_pts[2];
+static lv_point_t anim_fixed_top_pts[2];
+static lv_point_t anim_moving_bot_pts[2];
+static lv_point_t anim_moving_top_pts[2];
 
 /* ══════════════════════════════════════════════════════════════
  *  Thickness animation elements
@@ -299,6 +310,12 @@ static void button_pressed(void)
             return;
         }
 
+       /* Process screen — buttons do nothing during heating/bending/cooling */
+        if (current_sm_screen == SM_SCREEN_PROCESS) {
+            printk(">>> Button ignored during process screen\n");
+            return;
+        }
+
         /* Input selection screens */
         printk(">>> Forward (step %d -> %d)\n", input_step, input_step + 1);
         int ret = input_selection_next();
@@ -318,6 +335,12 @@ static void button_pressed(void)
         btn_bck_pressed = false;
 
         if (on_directions_screen || current_sm_screen == SM_SCREEN_COMPLETE) {
+            return;
+        }
+
+        /* Process screen — back button also does nothing */
+        if (current_sm_screen == SM_SCREEN_PROCESS) {
+            printk(">>> Button ignored during process screen\n");
             return;
         }
 
@@ -556,7 +579,7 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    static lv_point_precise_t base_pts[2] = {
+    static lv_point_t base_pts[2] = {
         {THICK_BAR_X, THICK_BASE_Y},
         {THICK_BAR_X2, THICK_BASE_Y}
     };
@@ -566,7 +589,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    static lv_point_precise_t acrylic_pts[2] = {
+    static lv_point_t acrylic_pts[2] = {
         {THICK_BAR_X, THICK_ACRYLIC_Y},
         {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
@@ -878,6 +901,7 @@ void display_update_value(const char *value)
         lv_label_set_text(process_value_label, value);
 }
 
+/* Called from display thread only — touches LVGL directly. */
 void display_update_progress(int pct, int min, int sec)
 {
     if (bar == NULL) return;
@@ -885,13 +909,21 @@ void display_update_progress(int pct, int min, int sec)
     char pct_buf[8];
     snprintf(time_buf, sizeof(time_buf), "time remaining %02d:%02d", min, sec);
     snprintf(pct_buf,  sizeof(pct_buf),  "%d%%", pct);
-    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
     if (process_time_label != NULL) lv_label_set_text(process_time_label, time_buf);
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
 }
 
-/* Update progress bar based off stepper - bend angle */
-void display_update_bend_progress(float fraction)
+/* Called from state thread — posts to mailbox, display thread applies it. */
+/* Called from state thread — posts bend progress to mailbox. */
+void display_post_bend_progress(float fraction)
+{
+    g_bend_progress.fraction = fraction;
+    g_bend_progress.pending  = true;
+}
+
+/* Called from display thread only — touches LVGL directly. */
+static void display_update_bend_progress(float fraction)
 {
     if (bar == NULL) return;
     int pct = (int)(fraction * 100.0f);
@@ -899,7 +931,7 @@ void display_update_bend_progress(float fraction)
 
     char pct_buf[8];
     snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
-    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
     if (process_time_label != NULL) lv_label_set_text(process_time_label, "bending...");
 }
@@ -915,6 +947,18 @@ void display_update(void)
     if (thick_update_pending) {
         thick_update_pending = false;
         thick_anim_set(sel_thickness);
+    }
+
+    /* Handle countdown progress updates from state thread */
+    if (g_progress.bend_pending) {
+        g_progress.bend_pending = false;
+        display_update_bend_progress(g_progress.bend_fraction);
+    }
+
+    /* Handle bend progress updates from state thread */
+    if (g_bend_progress.pending) {
+        g_bend_progress.pending = false;
+        display_update_bend_progress(g_bend_progress.fraction);
     }
 
     lv_task_handler();

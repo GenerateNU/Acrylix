@@ -78,7 +78,7 @@
         steps-per-period = <4>;
         sample-time-us = <2000>;
         idle-timeout-ms = <200>;
-        status = "okay";
+        status = "disabled";
     };
 
     /*
@@ -111,7 +111,7 @@
 /* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
 &timers3 {
     status = "okay";
-    st,prescaler = <0>;
+    st,prescaler = <95>;  /* 96 MHz / 96 = 1 MHz timer → 1 µs resolution, 65.5 ms max period */
 
     pwm3: pwm {
         status = "okay";

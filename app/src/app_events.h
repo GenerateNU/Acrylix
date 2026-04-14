@@ -29,6 +29,17 @@ typedef enum {
     EVT_ERROR
 } system_event_t;
 
+typedef struct {
+    int  pct;
+    int  min;
+    int  sec;
+    bool pending;
+    float bend_fraction;
+    bool  bend_pending;  
+} progress_update_t;
+
+extern progress_update_t g_progress;
+
 /* ── User inputs — written by display, read by state thread ── */
 typedef struct {
     int bend_angle;   /* degrees, 0-90 */

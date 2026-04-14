@@ -47,6 +47,8 @@ const char *get_state_name(system_state_t state)
     }
 }
 
+progress_update_t g_progress = { 0, 0, 0, false };
+
 /* ══════════════════════════════════════════════════════════════
  *  State transition
  * ══════════════════════════════════════════════════════════════ */

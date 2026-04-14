@@ -8,6 +8,7 @@
 #include "stepper/limit_sw.h"
 #include "stepper/drv8452_spi.h"
 #include "temp/temp_control.h"
+#include "app_events.h"
 
 /* ══════════════════════════════════════════════════════════════
  *  Heating time constants
@@ -36,7 +37,7 @@ K_MSGQ_DEFINE(display_queue, sizeof(display_msg_t),  4, 4);
  *  Thread config
  * ══════════════════════════════════════════════════════════════ */
 
-#define STATE_STACK_SIZE    4096
+#define STATE_STACK_SIZE    8192
 #define STATE_PRIORITY      7
 #define DISPLAY_STACK_SIZE  12288
 #define DISPLAY_PRIORITY    6
@@ -57,16 +58,21 @@ static void run_countdown(int total_ms)
         int64_t elapsed = k_uptime_get() - start;
         if (elapsed >= total_ms) break;
 
-        int pct    = (int)((elapsed * 100) / total_ms);
         int rem_ms = total_ms - (int)elapsed;
-        int min    = rem_ms / 60000;
-        int sec    = (rem_ms % 60000) / 1000;
 
-        display_update_progress(pct, min, sec);
+        /* Write to shared struct — display thread reads it */
+        g_progress.pct     = (int)((elapsed * 100) / total_ms);
+        g_progress.min     = rem_ms / 60000;
+        g_progress.sec     = (rem_ms % 60000) / 1000;
+        g_progress.pending = true;
+
         k_sleep(K_MSEC(250));
     }
-    display_update_progress(100, 0, 0);
-    k_sleep(K_MSEC(500));   /* brief pause so user sees 100% */
+    g_progress.pct     = 100;
+    g_progress.min     = 0;
+    g_progress.sec     = 0;
+    g_progress.pending = true;
+    k_sleep(K_MSEC(500));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -76,7 +82,9 @@ static void run_countdown(int total_ms)
 void state_thread(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
-    printk("State thread started\n");
+    size_t stack_free;
+    k_thread_stack_space_get(k_current_get(), &stack_free);
+    printk("State thread started, stack free: %zu\n", stack_free);
 
     while (1) {
         switch (g_sm.current) {
@@ -115,50 +123,46 @@ void state_thread(void *p1, void *p2, void *p3)
 
         /* ── BEND ─────────────────────────────────────────────
          * Phase 1: heating countdown (duration from thickness).
-         * Phase 2: bending countdown (BEND_TIME_MS).
+         * Phase 2: motor runs until limit switch — no display updates.
          * ─────────────────────────────────────────────────── */
         case STATE_BEND: {
+            system_event_t dummy;
+            while (k_msgq_get(&event_queue, &dummy, K_NO_WAIT) == 0) {}
             int heat_ms = (g_inputs.thickness == 1)
                           ? HEAT_TIME_1_8_MS
                           : HEAT_TIME_1_16_MS;
 
-            /* Phase 1 — heating (display already shows "Heating...") */
             printk("Heating: %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            run_countdown(heat_ms);
+            //run_countdown(heat_ms);
+            printk("Heating done\n");
 
-            /* Switch display to bending phase */
-            display_msg_t dmsg = { .state = 7 };   /* state 6 = Bending screen */
+            /* Switch display to bending screen */
+            /*display_msg_t dmsg = { .state = 7 };
             k_msgq_put(&display_queue, &dmsg, K_NO_WAIT);
-            k_sleep(K_MSEC(50));
+            k_sleep(K_MSEC(50)); */
 
-            /* Safety check before moving */
-            if (limit_sw_is_pressed()) {
+            /*if (limit_sw_is_pressed()) {
                 printk("Bend aborted — limit switch already pressed\n");
                 g_sm.error_code = ERR_STEPPER;
                 sm_transition(STATE_ERROR);
                 break;
-            }
+            }*/
 
-            /* Phase 2 — bending */
-            printk("Bending: %d ms\n", BEND_TIME_MS);
-            display_update_bend_progress(0.0f);
-
-            #define BEND_STEP_DEG   2.0f    /* move in 2 degree increments */
+            /* Run motor in 2° increments until limit switch — no display updates */
+            #define BEND_STEP_DEG 2.0f
             float total_moved = 0.0f;
             bool bend_error = false;
 
-            while (!limit_sw_is_pressed()) {
+            printk("BEND: moving 45 degrees at 10 RPM\n");
+            stepper_move_degrees(45.0f, BEND_RPM);
+            printk("BEND: done. steps=%ld\n", stepper_get_steps());
+
+            /*while (!limit_sw_is_pressed()) {
                 stepper_move_degrees(BEND_STEP_DEG, BEND_RPM);
                 total_moved += BEND_STEP_DEG;
 
-                /* Update progress bar — cap at 95% until switch actually triggers */
-                float progress = total_moved / HOME_MAX_DEG;
-                if (progress > 0.95f) progress = 0.95f;
-                display_update_bend_progress(progress);
-
-                /* Safety — full travel without hitting switch */
                 if (total_moved >= HOME_MAX_DEG) {
                     printk("Bend error — limit switch not reached after full travel\n");
                     g_sm.error_code = ERR_STEPPER;
@@ -166,12 +170,10 @@ void state_thread(void *p1, void *p2, void *p3)
                     bend_error = true;
                     break;
                 }
-            }
+            }*/
 
             if (!bend_error) {
-                display_update_bend_progress(1.0f);   /* show 100% */
-                k_sleep(K_MSEC(300));                 /* brief pause so user sees 100% */
-                printk("Bend complete\n");
+                printk("Bend complete — moved %.1f deg\n", (double)total_moved);
                 g_sm.bend_complete = true;
                 sm_transition(STATE_COOL);
             }
@@ -183,7 +185,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COOL: {
             printk("Cooling: %d ms\n", COOL_TIME_MS);
-            run_countdown(COOL_TIME_MS);
+            //run_countdown(COOL_TIME_MS);
             g_sm.cool_complete = true;
             sm_transition(STATE_COMPLETE);
             break;

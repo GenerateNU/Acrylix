@@ -61,14 +61,20 @@ void display_update_value(const char *value);
 
 /**
  * @brief Update the progress bar and time remaining on the process screen.
+ *        Must only be called from the display thread.
  * @param pct  Percentage complete (0–100).
  * @param min  Minutes remaining.
  * @param sec  Seconds remaining (0–59).
  */
 void display_update_progress(int pct, int min, int sec);
 
-/* Update the progress bar for the bend angle */
-void display_update_bend_progress(float fraction);   /* 0.0 to 1.0 */
+/**
+ * @brief Post a bend progress update from the state thread.
+ *        Thread-safe: writes to a mailbox consumed by display_update().
+ *        Use this instead of calling LVGL directly from the state thread.
+ * @param fraction  0.0 (start) to 1.0 (complete)
+ */
+void display_post_bend_progress(float fraction);
 
 /* ══════════════════════════════════════════════════════════════
  *  Encoder public API
