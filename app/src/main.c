@@ -256,6 +256,17 @@ int main(void)
     sm_init();
     printk("sm_init done \n");
 
+    if (drv8452_spi_init() != 0) {
+        printk("drv8452_spi_init failed\n");
+    }
+    if (stepper_init() != 0) {
+        printk("stepper_init failed\n");
+    }
+
+    drv8452_disable();
+
+    limit_sw_init();
+
     printk("creating state thread \n");
     k_tid_t state_tid = k_thread_create(
         &state_thread_data, state_stack,

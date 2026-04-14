@@ -1,7 +1,7 @@
 #include "limit_sw.h"
-#include "stepper.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
+#include <stdbool.h>
 
 static const struct device *gpioa;
 static struct gpio_callback limit_sw_cb_data;
@@ -12,7 +12,6 @@ static void limit_sw_isr(const struct device *dev,
                           uint32_t pins)
 {
     printk("LIMIT SWITCH: hit — motor stop required\n");
-    //stepper_emergency_stop();
 }
 
 void limit_sw_init(void)

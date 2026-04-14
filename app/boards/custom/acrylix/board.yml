@@ -1,5 +1,6 @@
 board:
   name: acrylix
+  full_name: AcrylicBender Custom PCB
   vendor: custom
   socs:
     - name: stm32f446xx
