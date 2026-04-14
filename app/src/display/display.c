@@ -892,6 +892,20 @@ void display_update_progress(int pct, int min, int sec)
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
 }
 
+/* Update progress bar based off stepper - bend angle */
+void display_update_bend_progress(float fraction)
+{
+    if (bar == NULL) return;
+    int pct = (int)(fraction * 100.0f);
+    if (pct > 100) pct = 100;
+
+    char pct_buf[8];
+    snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
+    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
+    if (process_time_label != NULL) lv_label_set_text(process_time_label, "bending...");
+}
+
 /* ══════════════════════════════════════════════════════════════
  *  Periodic update — call every ~10 ms from display thread
  * ══════════════════════════════════════════════════════════════ */
