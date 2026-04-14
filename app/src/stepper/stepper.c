@@ -109,6 +109,21 @@ static void do_move(long steps, uint32_t period_ns, int dir)
     }
 }
 
+/* ── Emergency stop ───────────── */
+void stepper_emergency_stop(void)
+{
+    pwm_set_dt(&step_pwm, 312500u, 0u);
+    g_target_steps = 0;
+    k_sem_give(&g_move_done);
+    printk("Stepper: emergencyt stop \n");
+}
+
+void stepper_reset_position(void)
+{
+    g_current_steps = 0;
+    printk("Stepper: position reset to 0\n");
+}
+
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
 /**

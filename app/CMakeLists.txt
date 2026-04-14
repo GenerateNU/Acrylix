@@ -17,8 +17,8 @@ target_sources(app PRIVATE
 	src/display/display.c
 	src/stepper/drv8452_spi.c
 	src/stepper/stepper.c
+	src/stepper/limit_sw.c
 	src/temp/temp.c
 	src/temp/temp_sensor.c
 	src/temp/temp_control.c
-	src/states/states.c
-	src/stepper/limit_sw.c)
+	src/states/states.c)

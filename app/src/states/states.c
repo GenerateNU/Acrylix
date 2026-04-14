@@ -1,6 +1,9 @@
 /* states.c */
 #include "states.h"
+#include "stepper/stepper.h"
+#include "stepper/limit_sw.h"
 #include <zephyr/kernel.h>
+#include "stepper/drv8452_spi.h"
 
 /* ══════════════════════════════════════════════════════════════
  *  Global state machine context
@@ -107,7 +110,15 @@ void idle_entry(void)
 void homing_entry(void)
 {
     printk("Entering HOMING\n");
-    /* TODO: trigger homing sequence */
+    
+    /* If already at home */
+    if (limit_sw_is_pressed()){
+        printk("Homing: already at home \n");
+        stepper_reset_position();
+        return;
+    }
+
+    printk("Homing: moving backward \n");
 }
 
 void initialization_entry(void)
@@ -121,7 +132,14 @@ void bend_entry(void)
     printk("Entering BEND — angle: %d deg, thickness: %s\n",
            g_inputs.bend_angle,
            g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-    /* State thread handles heating and bending countdown loops */
+    drv8452_enable();
+
+    if(limit_sw_is_pressed()){
+        printk("Bend entry: limit switch pressed \n");
+        g_sm.error_code = ERR_STEPPER;
+    }
+
+    printk("Bend entry: motor enable, heater on \n");
 }
 
 void cool_entry(void)
@@ -133,11 +151,12 @@ void cool_entry(void)
 void complete_entry(void)
 {
     printk("Entering COMPLETE\n");
+    drv8452_disable();
     /* Display already updated via display_queue in sm_transition */
 }
 
 void error_entry(void)
 {
     printk("Entering ERROR — code: %d\n", g_sm.error_code);
-    /* TODO: trigger emergency stop, disable heater, disable steppers */
+    drv8452_disable();    
 }

@@ -4,20 +4,26 @@
 #include <zephyr/drivers/gpio.h>
 #include "states/states.h"
 #include "display/display.h"
-#include "stepper/drv8452_spi.h"
 #include "stepper/stepper.h"
 #include "stepper/limit_sw.h"
+#include "stepper/drv8452_spi.h"
 #include "temp/temp_control.h"
 
 /* ══════════════════════════════════════════════════════════════
- *  Timing constants
- *  Change BEND_TIME_MS when real motor timing is known.
+ *  Heating time constants
  * ══════════════════════════════════════════════════════════════ */
 
 #define HEAT_TIME_1_16_MS   10000   /* 1/16 in — 10 s */
 #define HEAT_TIME_1_8_MS     5000   /* 1/8 in  — 5 s  */
-#define BEND_TIME_MS        10000   /* bending duration — adjust later */
 #define COOL_TIME_MS        10000   /* cooling duration */
+
+/* ══════════════════════════════════════════════════════════════
+ *  Bending constants
+ * ══════════════════════════════════════════════════════════════ */
+#define BEND_TIME_MS        10000   /* bending duration — adjust later */
+#define BEND_RPM            10.0f   /* RPM during bending */
+#define HOME_RPM            5.0f   /* RPM during homing — slow for accuracy */
+#define HOME_MAX_DEG        360.0f  /* max degrees to travel when homing */
 
 /* ══════════════════════════════════════════════════════════════
  *  Message queues (definitions — declared extern in states.h)
@@ -129,8 +135,17 @@ void state_thread(void *p1, void *p2, void *p3)
 
             /* Phase 2 — bending */
             printk("Bending: %d ms\n", BEND_TIME_MS);
-            run_countdown(BEND_TIME_MS);
+            stepper_move_degrees(HOME_MAX_DEG, BEND_RPM);
 
+            /* Verify limit switch was hit */
+            if (!limit_sw_is_pressed()) {
+                printk("Bend error — limit switch not reached\n");
+                g_sm.error_code = ERR_STEPPER;
+                sm_transition(STATE_ERROR);
+                break;
+            }
+
+            printk("Bend complete \n");
             g_sm.bend_complete = true;
             sm_transition(STATE_COOL);
             break;
@@ -165,8 +180,25 @@ void state_thread(void *p1, void *p2, void *p3)
          * Placeholder — skip to IDLE for now.
          * ─────────────────────────────────────────────────── */
         case STATE_HOMING:
-            k_sleep(K_MSEC(500));
-            sm_transition(STATE_IDLE);
+            
+            /* If already at home, then return to IDLE */
+            if (limit_sw_is_pressed()){
+                sm_transition(STATE_IDLE);
+                break;
+            }
+
+            stepper_move_degrees(-HOME_MAX_DEG, HOME_RPM);
+            if(limit_sw_is_pressed()){
+                printk("Homing: home position found\n");
+                stepper_reset_position();
+                stepper_move_degrees(2.0f, HOME_RPM);
+                stepper_reset_position();
+                sm_transition(STATE_IDLE);
+            }   else {
+                    printk("Homing: limit switch not found\n");
+                    g_sm.error_code = ERROR_HOMING_FAILED;
+                    sm_transition(STATE_ERROR);
+            }
             break;
 
         /* ── ERROR ────────────────────────────────────────────
