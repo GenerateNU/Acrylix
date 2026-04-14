@@ -133,21 +133,48 @@ void state_thread(void *p1, void *p2, void *p3)
             k_msgq_put(&display_queue, &dmsg, K_NO_WAIT);
             k_sleep(K_MSEC(50));
 
-            /* Phase 2 — bending */
-            printk("Bending: %d ms\n", BEND_TIME_MS);
-            stepper_move_degrees(HOME_MAX_DEG, BEND_RPM);
-
-            /* Verify limit switch was hit */
-            if (!limit_sw_is_pressed()) {
-                printk("Bend error — limit switch not reached\n");
+            /* Safety check before moving */
+            if (limit_sw_is_pressed()) {
+                printk("Bend aborted — limit switch already pressed\n");
                 g_sm.error_code = ERR_STEPPER;
                 sm_transition(STATE_ERROR);
                 break;
             }
 
-            printk("Bend complete \n");
-            g_sm.bend_complete = true;
-            sm_transition(STATE_COOL);
+            /* Phase 2 — bending */
+            printk("Bending: %d ms\n", BEND_TIME_MS);
+            display_update_bend_progress(0.0f);
+
+            #define BEND_STEP_DEG   2.0f    /* move in 2 degree increments */
+            float total_moved = 0.0f;
+            bool bend_error = false;
+
+            while (!limit_sw_is_pressed()) {
+                stepper_move_degrees(BEND_STEP_DEG, BEND_RPM);
+                total_moved += BEND_STEP_DEG;
+
+                /* Update progress bar — cap at 95% until switch actually triggers */
+                float progress = total_moved / HOME_MAX_DEG;
+                if (progress > 0.95f) progress = 0.95f;
+                display_update_bend_progress(progress);
+
+                /* Safety — full travel without hitting switch */
+                if (total_moved >= HOME_MAX_DEG) {
+                    printk("Bend error — limit switch not reached after full travel\n");
+                    g_sm.error_code = ERR_STEPPER;
+                    sm_transition(STATE_ERROR);
+                    bend_error = true;
+                    break;
+                }
+            }
+
+            if (!bend_error) {
+                display_update_bend_progress(1.0f);   /* show 100% */
+                k_sleep(K_MSEC(300));                 /* brief pause so user sees 100% */
+                printk("Bend complete\n");
+                g_sm.bend_complete = true;
+                sm_transition(STATE_COOL);
+            }
             break;
         }
 
@@ -287,7 +314,6 @@ int main(void)
 
     // temp_init();
     // heater_start();
-    // limit_sw_init();
 
     // /* SSR toggle test — PC9 high/low every 2 seconds */
     // const struct device *gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));

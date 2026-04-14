@@ -42,6 +42,7 @@ static const struct gpio_dt_spec step_fb   = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, 
 
 /* ── ISR state (shared between ISR and thread — volatile + atomic) ────────── */
 static volatile long        g_target_steps = 0;   /* steps remaining */
+static volatile long g_total_steps = 0;
 static struct k_sem         g_move_done;
 static struct gpio_callback g_step_cb;
 
@@ -96,6 +97,7 @@ static void do_move(long steps, uint32_t period_ns, int dir)
     k_msleep(1);   /* DIR settle */
 
     g_target_steps = steps;
+    g_total_steps = steps;
 
     /* Open-loop timeout: expected move time * 2 + 500 ms */
     uint32_t timeout_ms = (uint32_t)(((uint64_t)steps * period_ns) / 1000000ULL) * 2U + 500U;
@@ -118,12 +120,22 @@ void stepper_emergency_stop(void)
     printk("Stepper: emergencyt stop \n");
 }
 
+/* ── Homing of motor ───────────── */
 void stepper_reset_position(void)
 {
     g_current_steps = 0;
     printk("Stepper: position reset to 0\n");
 }
 
+/* ── Gets progress of stepper for the UI ───────────── */
+float stepper_get_progress(void)
+{
+    if (g_total_steps <= 0) return 1.0f;
+    long done = g_total_steps - g_target_steps;
+    if (done < 0) done = 0;
+    float pct = (float)done / (float)g_total_steps;
+    return pct > 1.0f ? 1.0f : pct;
+}
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
 /**

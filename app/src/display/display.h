@@ -67,6 +67,9 @@ void display_update_value(const char *value);
  */
 void display_update_progress(int pct, int min, int sec);
 
+/* Update the progress bar for the bend angle */
+void display_update_bend_progress(float fraction);   /* 0.0 to 1.0 */
+
 /* ══════════════════════════════════════════════════════════════
  *  Encoder public API
  * ══════════════════════════════════════════════════════════════ */
