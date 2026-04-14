@@ -2,12 +2,12 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
-#include "display/display.h"
 #include "states/states.h"
+#include "display/display.h"
 #include "stepper/drv8452_spi.h"
 #include "stepper/stepper.h"
-#include "temp/temp_control.h"
 #include "stepper/limit_sw.h"
+#include "temp/temp_control.h"
 
 /* ══════════════════════════════════════════════════════════════
  *  Timing constants
