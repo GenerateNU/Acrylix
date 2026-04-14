@@ -4,6 +4,10 @@
 #include <zephyr/drivers/gpio.h>
 #include "display/display.h"
 #include "states/states.h"
+#include "stepper/drv8452_spi.h"
+#include "stepper/stepper.h"
+#include "temp/temp_control.h"
+#include "stepper/limit_sw.h"
 
 /* ══════════════════════════════════════════════════════════════
  *  Timing constants
@@ -214,9 +218,8 @@ void display_thread(void *p1, void *p2, void *p3)
 
 int main(void)
 {
-    printk("BOOT\n");
+    printk("=== Acrylix boot ===\n");
     k_msleep(100);
-    printk("project starting\n");
 
     sm_init();
     printk("sm_init done \n");
@@ -238,6 +241,24 @@ int main(void)
         DISPLAY_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(display_tid, "display");
     printk("Display thread created\n");
+
+    // temp_init();
+    // heater_start();
+    // limit_sw_init();
+
+    // /* SSR toggle test — PC9 high/low every 2 seconds */
+    // const struct device *gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    // gpio_pin_configure(gpioc, 9, GPIO_OUTPUT_INACTIVE);
+
+    // while (1) {
+    //     gpio_pin_set(gpioc, 9, 1);
+    //     printk("SSR ON\n");
+    //     k_sleep(K_SECONDS(2));
+
+    //     gpio_pin_set(gpioc, 9, 0);
+    //     printk("SSR OFF\n");
+    //     k_sleep(K_SECONDS(2));
+    // }
 
     k_sleep(K_FOREVER);
     return 0;

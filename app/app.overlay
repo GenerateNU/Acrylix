@@ -1,5 +1,7 @@
 #include <zephyr/dt-bindings/gpio/gpio.h>
 #include <zephyr/dt-bindings/input/input-event-codes.h>
+#include <zephyr/dt-bindings/pwm/pwm.h>
+#include <zephyr/dt-bindings/adc/adc.h>
 #include <zephyr/dt-bindings/display/panel.h>
 
 /* ── Clock — use internal HSI, no external crystal on PCB ── */
@@ -38,11 +40,90 @@
     chosen {
         zephyr,display = &ili9341;
     };
-};
 
-/* ── GPIO port enables ──────────────────────────────────── */
-&gpioa {
-    status = "okay";
+    aliases {
+        stepper-step = &stepper_step_gpio;
+        stepper-dir  = &stepper_dir_gpio;
+        led0         = &user_led;
+    };
+
+    lvgl_encoder: lvgl_encoder {
+        compatible = "zephyr,lvgl-encoder-input";
+        rotation-input-code = <INPUT_REL_X>;
+    };
+
+    stepper_step_gpio: stepper_step {
+        compatible = "gpio-leds";
+        gpios = <&gpioa 0 GPIO_ACTIVE_HIGH>;    /* VERIFY pin against schematic */
+    };
+
+    stepper_dir_gpio: stepper_dir {
+        compatible = "gpio-leds";
+        gpios = <&gpioa 1 GPIO_ACTIVE_HIGH>;    /* VERIFY pin against schematic */
+    };
+
+    leds {
+        compatible = "gpio-leds";
+        user_led: led_0 {
+            gpios = <&gpioa 5 GPIO_ACTIVE_HIGH>; /* VERIFY pin against schematic */
+            label = "User LED";
+        };
+    };
+
+    encoder: encoder {
+        compatible = "gpio-qdec";
+        gpios = <&gpiob 3 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>,
+                <&gpioa 10 (GPIO_ACTIVE_HIGH | GPIO_PULL_UP)>;
+        zephyr,axis = <INPUT_REL_X>;
+        steps-per-period = <4>;
+        sample-time-us = <2000>;
+        idle-timeout-ms = <200>;
+        status = "okay";
+    };
+
+    /*
+     * Stepper motor resources for stepper.c (DRV8452, hardware interface mode)
+     *
+     * LQFP64 pin 26 = PB0 → STEP (TIM3_CH3 PWM output)
+     * LQFP64 pin 27 = PB1 → DIR  (GPIO output)
+     *
+     * step-gpios is wired to PB0 (same pin as PWM output). On STM32 the GPIO
+     * input buffer remains active in AF mode, so EXTI fires on every rising
+     * edge of the TIM3_CH3 output. The step ISR in stepper.c uses this to
+     * count pulses and stop the PWM exactly at the target step count.
+     */
+    zephyr_user: zephyr_user {
+        compatible = "zephyr,user";
+        pwms      = <&pwm3 3 100000 PWM_POLARITY_NORMAL>; /* TIM3_CH3, PB0 */
+        dir-gpios  = <&gpiob 1 GPIO_ACTIVE_HIGH>;          /* PB1            */
+        step-gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;          /* PB0 — EXTI on AF output for closed-loop counting */
+    };
+
+    mipi_dbi: mipi-dbi-spi {
+        compatible = "zephyr,mipi-dbi-spi";
+        dc-gpios    = <&gpiob 8 GPIO_ACTIVE_HIGH>;  /* VERIFY against schematic */
+        reset-gpios = <&gpiob 9 GPIO_ACTIVE_LOW>;   /* VERIFY against schematic */
+        spi-dev = <&spi1>;
+        write-only;
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        ili9341: ili9341@0 {
+            compatible = "ilitek,ili9340";
+            mipi-max-frequency = <25000000>;
+            reg = <0>;
+            width = <320>;
+            height = <240>;
+            pixel-format = <PANEL_PIXEL_FORMAT_RGB_565>;
+            rotation = <90>;
+            frmctr1 = [00 1b];
+            pwctrl1 = [26 00];
+            vmctrl1 = [31 3c];
+            vmctrl2 = [c0];
+            pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];
+            ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
+        };
+    };
 };
 
 &gpiob {
@@ -53,14 +134,19 @@
     status = "okay";
 };
 
-/* ── SPI1 — ILI9341 display ─────────────────────────────────
- * PA4 = CS
- * PA5 = SCK   (spi1_sck_pa5)
- * PA6 = MISO  (spi1_miso_pa6, unused — display is write-only)
- * PA7 = MOSI  (spi1_mosi_pa7)
- * PC6 = DC
- * PC7 = RST
- * ─────────────────────────────────────────────────────────── */
+/* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
+&timers3 {
+    status = "okay";
+    st,prescaler = <0>;
+
+    pwm3: pwm {
+        status = "okay";
+        pinctrl-0 = <&tim3_ch3_pb0>;
+        pinctrl-names = "default";
+        #pwm-cells = <3>;
+    };
+};
+
 &spi1 {
     status = "okay";
     pinctrl-0 = <&spi1_sck_pa5 &spi1_miso_pa6 &spi1_mosi_pa7>;
@@ -92,4 +178,54 @@
             ngamctrl = [0c 23 26 04 10 04 39 24 4b 03 0b 0b 33 37 0f];
         };
     };
+};
+
+/* SPI2 hardware node DISABLED — top-row J502 traces (PB12-PB15) confirmed
+ * physically dead. DRV8452 is now driven by GPIO bit-bang on bottom-row pins:
+ *   PB6=nCS  PB7=SCLK  PB8=MOSI  PB5=MISO
+ * NOTE: PB6 overlaps SPI1 cs-gpios (display) and PB8 overlaps MIPI DBI dc-gpios.
+ * Display will not work while DRV8452 bit-bang is active on these pins. */
+
+/* ADC1_IN15 on PC5 — PT1000 temperature sensing via voltage divider */
+&pinctrl {
+    adc1_in15_pc5: adc1_in15_pc5 {
+        pinmux = <STM32_PINMUX('C', 5, ANALOG)>;
+    };
+};
+
+&adc1 {
+    status = "okay";
+    #address-cells = <1>;
+    #size-cells = <0>;
+    pinctrl-0 = <&adc1_in15_pc5>;
+    pinctrl-names = "default";
+    st,adc-prescaler = <4>; /* APB2=90MHz → ADC clk=22.5MHz (max 36MHz) */
+
+    channel@f {
+        reg = <15>;
+        zephyr,gain = "ADC_GAIN_1";
+        zephyr,reference = "ADC_REF_INTERNAL";
+        zephyr,acquisition-time = <ADC_ACQ_TIME_DEFAULT>;
+        zephyr,resolution = <12>;
+    };
+};
+
+/* Disable HSE - no external crystal on custom hardware */
+&clk_hse {
+    status = "disabled";
+};
+
+/* Enable internal HSI (16MHz) */
+&clk_hsi {
+    status = "okay";
+};
+
+/* Reconfigure PLL to use HSI instead of HSE */
+&pll {
+    div-m = <16>;
+    mul-n = <192>;
+    div-p = <2>;
+    div-q = <4>;
+    clocks = <&clk_hsi>;
+    status = "okay";
 };
