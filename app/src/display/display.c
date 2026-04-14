@@ -93,10 +93,10 @@ static lv_obj_t  *anim_fixed_top;
 static lv_obj_t  *anim_moving_bot;
 static lv_obj_t  *anim_moving_top;
 static lv_obj_t  *anim_value_label;
-static lv_point_t anim_fixed_bot_pts[2];
-static lv_point_t anim_fixed_top_pts[2];
-static lv_point_t anim_moving_bot_pts[2];
-static lv_point_t anim_moving_top_pts[2];
+static lv_point_precise_t anim_fixed_bot_pts[2];
+static lv_point_precise_t anim_fixed_top_pts[2];
+static lv_point_precise_t anim_moving_bot_pts[2];
+static lv_point_precise_t anim_moving_top_pts[2];
 
 /* ══════════════════════════════════════════════════════════════
  *  Thickness animation elements
@@ -225,12 +225,9 @@ static void btn_fwd_isr(const struct device *dev, struct gpio_callback *cb,
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
 
-    /* Only act on falling edge (button press, active low) */
     if (gpio_pin_get(gpiob, 10) != 0) {
-        return;   /* rising edge — button release, ignore */
+        return;
     }
-
-    /* Debounce — ignore if too soon after last press */
     if ((now - last_press) < DEBOUNCE_MS) {
         return;
     }
@@ -328,6 +325,7 @@ static void button_pressed(void)
         int ret = input_selection_prev();
         if (ret == -1) {
             printk(">>> Cancelled — back to directions\n");
+            event_post(EVT_START_IDLE);
             direction_screen();
         } else {
             printk(">>> Returned to step %d\n", input_step);
@@ -558,7 +556,7 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    static lv_point_t base_pts[2] = {
+    static lv_point_precise_t base_pts[2] = {
         {THICK_BAR_X, THICK_BASE_Y},
         {THICK_BAR_X2, THICK_BASE_Y}
     };
@@ -568,7 +566,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    static lv_point_t acrylic_pts[2] = {
+    static lv_point_precise_t acrylic_pts[2] = {
         {THICK_BAR_X, THICK_ACRYLIC_Y},
         {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
