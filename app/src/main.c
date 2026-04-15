@@ -53,6 +53,14 @@ static struct k_thread display_thread_data;
 
 static void run_countdown(int total_ms)
 {
+    /* Wait until process_screen() has finished building all LVGL objects.
+     * sm_transition() posts to display_queue and returns immediately, so
+     * run_countdown() can be entered before the display thread has had a
+     * chance to drain the queue and call process_screen().  Taking this
+     * semaphore (given by process_screen at the end) ensures we never
+     * write g_progress while bar/labels are still NULL. */
+    k_sem_take(&display_screen_ready, K_MSEC(2000));
+
     int64_t start = k_uptime_get();
     while (1) {
         int64_t elapsed = k_uptime_get() - start;
@@ -135,7 +143,7 @@ void state_thread(void *p1, void *p2, void *p3)
             printk("Heating: %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            //run_countdown(heat_ms);
+            run_countdown(heat_ms);
             printk("Heating done\n");
 
             /* Switch display to bending screen */
@@ -185,7 +193,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COOL: {
             printk("Cooling: %d ms\n", COOL_TIME_MS);
-            //run_countdown(COOL_TIME_MS);
+            run_countdown(COOL_TIME_MS);
             g_sm.cool_complete = true;
             sm_transition(STATE_COMPLETE);
             break;

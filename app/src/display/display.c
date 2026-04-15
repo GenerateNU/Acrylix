@@ -36,6 +36,16 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 static const struct device *display_dev;
 
 /* ══════════════════════════════════════════════════════════════
+ *  Screen-ready synchronisation
+ *  process_screen() gives this semaphore after building all LVGL
+ *  objects.  run_countdown() takes it before its first g_progress
+ *  write, so the display thread can never receive a progress update
+ *  against a partially-constructed (or not-yet-constructed) screen.
+ * ══════════════════════════════════════════════════════════════ */
+
+K_SEM_DEFINE(display_screen_ready, 0, 1);
+
+/* ══════════════════════════════════════════════════════════════
  *  Bend progress mailbox (separate from g_progress in app_events.h)
  *  Written by state thread via display_post_bend_progress(),
  *  consumed by display thread in display_update().
@@ -829,6 +839,9 @@ static void process_screen(const char *header, const char *value)
 
     process_pct_label = make_label(lv_scr_act(), &style_body, "0%",
                                    LV_ALIGN_CENTER, 0, 75);
+
+    /* Signal run_countdown() that all LVGL objects are live. */
+    k_sem_give(&display_screen_ready);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -902,7 +915,7 @@ void display_update_value(const char *value)
 }
 
 /* Called from display thread only — touches LVGL directly. */
-void display_update_progress(int pct, int min, int sec)
+static void display_update_progress(int pct, int min, int sec)
 {
     if (bar == NULL) return;
     char time_buf[32];
@@ -949,7 +962,13 @@ void display_update(void)
         thick_anim_set(sel_thickness);
     }
 
-    /* Handle countdown progress updates from state thread */
+    /* Handle countdown progress updates from run_countdown() */
+    if (g_progress.pending) {
+        g_progress.pending = false;
+        display_update_progress(g_progress.pct, g_progress.min, g_progress.sec);
+    }
+
+    /* Handle bend-fraction progress updates from state thread */
     if (g_progress.bend_pending) {
         g_progress.bend_pending = false;
         display_update_bend_progress(g_progress.bend_fraction);

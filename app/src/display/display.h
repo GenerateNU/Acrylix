@@ -2,9 +2,19 @@
 #ifndef DISPLAY_H
 #define DISPLAY_H
 
+#include <zephyr/kernel.h>
+
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+/**
+ * @brief Semaphore given by process_screen() once all LVGL objects are built.
+ *        run_countdown() must take this before writing to g_progress so it
+ *        never fires display_update_progress() against a partially-constructed
+ *        screen.
+ */
+extern struct k_sem display_screen_ready;
 
 /* ══════════════════════════════════════════════════════════════
  *  Init / update — call from display thread
@@ -58,15 +68,6 @@ void display_set_state(int state);
  * @param value  Null-terminated string to display.
  */
 void display_update_value(const char *value);
-
-/**
- * @brief Update the progress bar and time remaining on the process screen.
- *        Must only be called from the display thread.
- * @param pct  Percentage complete (0–100).
- * @param min  Minutes remaining.
- * @param sec  Seconds remaining (0–59).
- */
-void display_update_progress(int pct, int min, int sec);
 
 /**
  * @brief Post a bend progress update from the state thread.
