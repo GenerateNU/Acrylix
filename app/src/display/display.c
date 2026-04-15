@@ -940,6 +940,7 @@ static void display_update_bend_progress(float fraction)
 {
     if (bar == NULL) return;
     int pct = (int)(fraction * 100.0f);
+    if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
 
     char pct_buf[8];
@@ -965,6 +966,7 @@ void display_update(void)
     /* Handle countdown progress updates from run_countdown() */
     if (g_progress.pending) {
         g_progress.pending = false;
+        __DMB();
         display_update_progress(g_progress.pct, g_progress.min, g_progress.sec);
     }
 

@@ -69,16 +69,18 @@ static void run_countdown(int total_ms)
         int rem_ms = total_ms - (int)elapsed;
 
         /* Write to shared struct — display thread reads it */
-        g_progress.pct     = (int)((elapsed * 100) / total_ms);
-        g_progress.min     = rem_ms / 60000;
-        g_progress.sec     = (rem_ms % 60000) / 1000;
+        g_progress.pct = (int)((elapsed * 100) / total_ms);
+        g_progress.min = rem_ms / 60000;
+        g_progress.sec = (rem_ms % 60000) / 1000;
+        __DMB();
         g_progress.pending = true;
 
         k_sleep(K_MSEC(250));
     }
-    g_progress.pct     = 100;
-    g_progress.min     = 0;
-    g_progress.sec     = 0;
+    g_progress.pct = 100;
+    g_progress.min = 0;
+    g_progress.sec = 0;
+    __DMB();
     g_progress.pending = true;
     k_sleep(K_MSEC(500));
 }
@@ -143,7 +145,8 @@ void state_thread(void *p1, void *p2, void *p3)
             printk("Heating: %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            run_countdown(heat_ms);
+            //run_countdown(heat_ms);
+
             printk("Heating done\n");
 
             /* Switch display to bending screen */
@@ -159,12 +162,14 @@ void state_thread(void *p1, void *p2, void *p3)
             }*/
 
             /* Run motor in 2° increments until limit switch — no display updates */
+            drv8452_enable();
+
             #define BEND_STEP_DEG 2.0f
             float total_moved = 0.0f;
             bool bend_error = false;
 
             printk("BEND: moving 45 degrees at 10 RPM\n");
-            stepper_move_degrees(45.0f, BEND_RPM);
+            stepper_move_degrees(45.0f, 20.0f);
             printk("BEND: done. steps=%ld\n", stepper_get_steps());
 
             /*while (!limit_sw_is_pressed()) {
@@ -193,7 +198,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COOL: {
             printk("Cooling: %d ms\n", COOL_TIME_MS);
-            run_countdown(COOL_TIME_MS);
+            //run_countdown(COOL_TIME_MS);
             g_sm.cool_complete = true;
             sm_transition(STATE_COMPLETE);
             break;

@@ -33,7 +33,7 @@ typedef struct {
     int  pct;
     int  min;
     int  sec;
-    bool pending;
+    volatile bool pending;
     float bend_fraction;
     bool  bend_pending;  
 } progress_update_t;
