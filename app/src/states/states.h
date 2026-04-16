@@ -52,6 +52,7 @@ void idle_entry(void);
 void homing_entry(void);
 void initialization_entry(void);
 void bend_entry(void);
+void heat_entry(void);
 void cool_entry(void);
 void complete_entry(void);
 void error_entry(void);

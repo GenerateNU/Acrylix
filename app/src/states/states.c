@@ -39,6 +39,7 @@ const char *get_state_name(system_state_t state)
         case STATE_IDLE:           return "IDLE";
         case STATE_HOMING:         return "HOMING";
         case STATE_INITIALIZATION: return "INITIALIZATION";
+        case STATE_HEAT:           return "HEAT";
         case STATE_BEND:           return "BEND";
         case STATE_COOL:           return "COOL";
         case STATE_COMPLETE:       return "COMPLETE";
@@ -77,6 +78,7 @@ void sm_transition(system_state_t new_state)
         case STATE_HOMING:         homing_entry();         break;
         case STATE_IDLE:           idle_entry();           break;
         case STATE_INITIALIZATION: initialization_entry(); break;
+        case STATE_HEAT:           heat_entry();           break;
         case STATE_BEND:           bend_entry();           break;
         case STATE_COOL:           cool_entry();           break;
         case STATE_COMPLETE:       complete_entry();       break;
@@ -121,6 +123,11 @@ void initialization_entry(void)
 {
     printk("Entering INITIALIZATION\n");
     /* Display thread handles input selection screens via display_queue */
+}
+
+void heat_entry(void)
+{
+    printk("Entering HEATING\n");
 }
 
 void bend_entry(void)

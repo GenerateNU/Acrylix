@@ -47,43 +47,6 @@ K_THREAD_STACK_DEFINE(display_stack, DISPLAY_STACK_SIZE);
 static struct k_thread state_thread_data;
 static struct k_thread display_thread_data;
 
-/* ══════════════════════════════════════════════════════════════
- *  Countdown helper — updates display progress every 250 ms
- * ══════════════════════════════════════════════════════════════ */
-
-static void run_countdown(int total_ms)
-{
-    /* Wait until process_screen() has finished building all LVGL objects.
-     * sm_transition() posts to display_queue and returns immediately, so
-     * run_countdown() can be entered before the display thread has had a
-     * chance to drain the queue and call process_screen().  Taking this
-     * semaphore (given by process_screen at the end) ensures we never
-     * write g_progress while bar/labels are still NULL. */
-    k_sem_take(&display_screen_ready, K_MSEC(2000));
-
-    int64_t start = k_uptime_get();
-    while (1) {
-        int64_t elapsed = k_uptime_get() - start;
-        if (elapsed >= total_ms) break;
-
-        int rem_ms = total_ms - (int)elapsed;
-
-        /* Write to shared struct — display thread reads it */
-        g_progress.pct = (int)((elapsed * 100) / total_ms);
-        g_progress.min = rem_ms / 60000;
-        g_progress.sec = (rem_ms % 60000) / 1000;
-        __DMB();
-        g_progress.pending = true;
-
-        k_sleep(K_MSEC(250));
-    }
-    g_progress.pct = 100;
-    g_progress.min = 0;
-    g_progress.sec = 0;
-    __DMB();
-    g_progress.pending = true;
-    k_sleep(K_MSEC(500));
-}
 
 /* ══════════════════════════════════════════════════════════════
  *  State machine thread
@@ -156,8 +119,8 @@ void state_thread(void *p1, void *p2, void *p3)
         case STATE_INITIALIZATION: {
             system_event_t evt;
             if (k_msgq_get(&event_queue, &evt, K_MSEC(100)) == 0) {
-                if (evt == EVT_START_BEND) {
-                    sm_transition(STATE_BEND);
+                if (evt == EVT_START_HEAT) {
+                    sm_transition(STATE_HEAT);
                 }
                 /* User pressed back from first input step */
                 if (evt == EVT_START_IDLE) {
@@ -167,15 +130,41 @@ void state_thread(void *p1, void *p2, void *p3)
             break;
         }
 
-        /* ── BEND ─────────────────────────────────────────────
-         * Phase 1: heat the acrylic (blocking sleep).
-         * Phase 2: move motor to the user-selected bend angle.
-         * Limit switch is the HOME sensor — not used here.
+        /* ── HEAT ─────────────────────────────────────────────
+         * Turn on heating element to correct temperature.
+         * Start timer to heat acrylic.
          * ─────────────────────────────────────────────────── */
-        case STATE_BEND: {
-            system_event_t dummy;
-            while (k_msgq_get(&event_queue, &dummy, K_NO_WAIT) == 0) {}
 
+        case STATE_HEAT: {
+            #define TARGET_TEMP         10.0f
+            #define WARMUP_TIMEOUT_MS   120000
+            
+            printk("HEAT: starting heater, target=%.1f C\n", (double)TARGET_TEMP);
+            heater_start();
+
+            bool heat_error = false;
+            int64_t warmup_start = k_uptime_get();
+
+            /* Find target temperature */
+            while(temp_get_ema() < TARGET_TEMP){
+                if(k_uptime_get() - warmup_start > WARMUP_TIMEOUT_MS){
+                    printk("HEAT: warmup timeout - heater fault \n");
+                    heater_stop();
+                    g_sm.error_code = ERROR_HEATER_TEMP;
+                    sm_transition(STATE_ERROR);
+                    heat_error = true;
+                    break;
+                }
+                printk("HEAT: current=%.1f C\n", (double)temp_get_ema());
+                k_sleep(K_MSEC(500));
+
+            }
+
+            if (heat_error) break;
+
+            printk("HEAT: target temperature reached \n");
+
+            /* Start heating timer given thickness */
             int heat_ms = (g_inputs.thickness == 1)
                           ? HEAT_TIME_1_8_MS
                           : HEAT_TIME_1_16_MS;
@@ -183,8 +172,19 @@ void state_thread(void *p1, void *p2, void *p3)
             printk("Heating: %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            k_sleep(K_MSEC(200));
+            k_sleep(K_MSEC(heat_ms));
+
+            heater_stop();
             printk("Heating done\n");
+            sm_transition(STATE_BEND);
+            break;
+        }
+
+        /* ── BEND ─────────────────────────────────────────────
+         * Move motor to the user-selected bend angle.
+         * Limit switch is the HOME sensor — not used here.
+         * ─────────────────────────────────────────────────── */
+        case STATE_BEND: {
 
             float target_deg = (float)g_inputs.bend_angle;
             printk("BEND: moving %.1f degrees at %.1f RPM\n",
@@ -204,6 +204,7 @@ void state_thread(void *p1, void *p2, void *p3)
             printk("Cooling: %d ms\n", COOL_TIME_MS);
             //run_countdown(COOL_TIME_MS);
             g_sm.cool_complete = true;
+            k_sleep(K_MSEC(500));
             sm_transition(STATE_COMPLETE);
             break;
         }
@@ -214,6 +215,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COMPLETE: {
             system_event_t evt;
+            k_sleep(K_MSEC(500));
             if (k_msgq_get(&event_queue, &evt, K_MSEC(100)) == 0) {
                 if (evt == EVT_START_IDLE) {
                     sm_transition(STATE_IDLE);
@@ -253,8 +255,6 @@ void display_thread(void *p1, void *p2, void *p3)
         printk("Failed to initialize display\n");
         return;
     }
-
-    /* display_init() already calls direction_screen() internally */
 
     size_t disp_stack_free;
     k_thread_stack_space_get(k_current_get(), &disp_stack_free);

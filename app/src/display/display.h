@@ -49,11 +49,11 @@ void display_create_home_screen(void);
  * @param state  Mapping:
  *   0 = STATE_IDLE        → directions screen
  *   1 = STATE_INIT        → input selection (bend radius first)
- *   2 = STATE_BEND ph1    → heating screen
+ *   2 = STATE_BEND        → bending screen
  *   3 = STATE_COOL        → cooling screen
  *   4 = STATE_COMPLETE    → complete screen
  *   5 = STATE_ERROR       → error screen
- *   6 = STATE_BEND ph2    → bending screen
+ *   6 = STATE_BEND        → bending screen
  */
 void display_set_state(int state);
 

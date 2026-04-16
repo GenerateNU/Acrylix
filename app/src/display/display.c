@@ -27,7 +27,8 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 #define THICK_BAR_X2    140
 #define THICK_ACRYLIC_Y 147
 
-#define DEBOUNCE_MS     250
+#define FWD_DEBOUNCE_MS     350
+#define BCK_DEBOUNCE_MS     250
 
 /* ══════════════════════════════════════════════════════════════
  *  Device handles
@@ -114,10 +115,10 @@ static lv_obj_t  *anim_fixed_top;
 static lv_obj_t  *anim_moving_bot;
 static lv_obj_t  *anim_moving_top;
 static lv_obj_t  *anim_value_label;
-static lv_point_precise_t anim_fixed_bot_pts[2];
-static lv_point_precise_t anim_fixed_top_pts[2];
-static lv_point_precise_t anim_moving_bot_pts[2];
-static lv_point_precise_t anim_moving_top_pts[2];
+static lv_point_t anim_fixed_bot_pts[2];
+static lv_point_t anim_fixed_top_pts[2];
+static lv_point_t anim_moving_bot_pts[2];
+static lv_point_t anim_moving_top_pts[2];
 
 /* ══════════════════════════════════════════════════════════════
  *  Thickness animation elements
@@ -251,10 +252,10 @@ static void btn_fwd_isr(const struct device *dev, struct gpio_callback *cb,
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
 
-    if (gpio_pin_get(gpiob, 10) != 0) {
+    if (gpio_pin_get(gpiob, 10) == 0) {
         return;
     }
-    if ((now - last_press) < DEBOUNCE_MS) {
+    if ((now - last_press) < FWD_DEBOUNCE_MS) {
         return;
     }
     last_press = now;
@@ -269,11 +270,11 @@ static void btn_bck_isr(const struct device *dev, struct gpio_callback *cb,
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
 
-    if (gpio_pin_get(gpiob, 15) != 0) {
+    if (gpio_pin_get(gpiob, 15) == 0) {
         return;
     }
 
-    if ((now - last_press) < DEBOUNCE_MS) {
+    if ((now - last_press) < BCK_DEBOUNCE_MS) {
         return;
     }
     last_press = now;
@@ -291,8 +292,8 @@ void buttons_init(void)
     }
     gpio_pin_configure(gpiob, 10, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_pin_configure(gpiob, 15, GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_BOTH);
-    gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_BOTH);
+    gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_RISING);
+    gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_RISING);
     gpio_init_callback(&btn_fwd_cb_data, btn_fwd_isr, BIT(10));
     gpio_init_callback(&btn_bck_cb_data, btn_bck_isr, BIT(15));
     gpio_add_callback(gpiob, &btn_fwd_cb_data);
@@ -340,7 +341,7 @@ static void button_pressed(void)
                    sel_thickness == 1 ? "1/8 in" : "1/16 in");
             g_inputs.bend_angle = sel_bend_angle;
             g_inputs.thickness  = sel_thickness;
-            event_post(EVT_START_BEND);
+            event_post(EVT_START_HEAT);
         } else {
             printk(">>> Advanced to step %d\n", input_step);
         }
@@ -609,7 +610,7 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    static lv_point_precise_t base_pts[2] = {
+    static lv_point_t base_pts[2] = {
         {THICK_BAR_X, THICK_BASE_Y},
         {THICK_BAR_X2, THICK_BASE_Y}
     };
@@ -619,7 +620,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    static lv_point_precise_t acrylic_pts[2] = {
+    static lv_point_t acrylic_pts[2] = {
         {THICK_BAR_X, THICK_ACRYLIC_Y},
         {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
@@ -665,8 +666,6 @@ int display_init(void)
     encoder_init();
     buttons_init();
     init_styles();
-
-    direction_screen();
 
     printk("LCD init: complete\n");
     return 0;
@@ -927,7 +926,8 @@ void display_set_state(int state)
     switch (state) {
         case STATE_IDLE:           direction_screen();                 break;
         case STATE_INITIALIZATION: input_selection_enter();            break;
-        case STATE_BEND:           process_screen("Heating...", "");   break;
+        case STATE_HEAT:           process_screen("Heating...", "");   break;
+        case STATE_BEND:           process_screen("Bending...", "");   break;
         case STATE_COOL:           process_screen("Cooling...", "");   break;
         case STATE_COMPLETE:       complete_screen();                  break;
         case STATE_ERROR:          error_screen("An error occurred."); break;

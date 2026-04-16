@@ -78,7 +78,7 @@
         steps-per-period = <4>;
         sample-time-us = <2000>;
         idle-timeout-ms = <200>;
-        status = "okay";
+        status = "disabled";
     };
 
     /*
@@ -96,7 +96,6 @@
         compatible = "zephyr,user";
         pwms      = <&pwm3 3 100000 PWM_POLARITY_NORMAL>; /* TIM3_CH3, PB0 */
         dir-gpios  = <&gpiob 1 GPIO_ACTIVE_HIGH>;          /* PB1            */
-        step-gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;          /* PB0 — EXTI on AF output for closed-loop counting */
     };
 };
 
@@ -111,7 +110,7 @@
 /* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
 &timers3 {
     status = "okay";
-    st,prescaler = <0>;
+    st,prescaler = <3>;
 
     pwm3: pwm {
         status = "okay";
