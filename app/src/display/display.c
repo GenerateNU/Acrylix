@@ -284,8 +284,8 @@ void buttons_init(void)
         printk("GPIOB not ready\n");
         return;
     }
-    gpio_pin_configure(gpiob, 10, GPIO_INPUT);
-    gpio_pin_configure(gpiob, 15, GPIO_INPUT);
+    gpio_pin_configure(gpiob, 10, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_pin_configure(gpiob, 15, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_BOTH);
     gpio_init_callback(&btn_fwd_cb_data, btn_fwd_isr, BIT(10));
@@ -449,7 +449,18 @@ static void clear_screen(void)
     process_time_label   = NULL;
     process_pct_label    = NULL;
     on_directions_screen = false;
+
+    /* Flush any pending LVGL refr/task work before deleting objects.
+     * Without this, LVGL's internal refresh queue can hold pointers to
+     * objects we are about to free, causing a crash on the next
+     * lv_task_handler() call. */
+    lv_task_handler();
+
     lv_obj_clean(lv_scr_act());
+
+    /* Remove previously-applied styles so we don't accumulate duplicates
+     * across multiple screen transitions, then re-apply the base style. */
+    lv_obj_remove_style_all(lv_scr_act());
     lv_obj_add_style(lv_scr_act(), &style_screen, 0);
 }
 
@@ -465,6 +476,10 @@ static lv_obj_t *make_label(lv_obj_t *parent,
                              lv_coord_t y_ofs)
 {
     lv_obj_t *lbl = lv_label_create(parent);
+    if (lbl == NULL) {
+        printk("ERROR: lv_label_create returned NULL (LVGL pool exhausted?)\n");
+        return NULL;
+    }
     lv_label_set_text(lbl, text);
     lv_obj_add_style(lbl, style, 0);
     lv_obj_align(lbl, align, x_ofs, y_ofs);
@@ -658,15 +673,21 @@ int display_init(void)
 
 static void direction_screen(void)
 {
-    printk("display: directions screen\n");
+    printk("display: directions screen — enter\n");
     clear_screen();
+    printk("display: directions screen — clear done\n");
     current_sm_screen    = SM_SCREEN_DIRECTIONS;
     on_directions_screen = true;
 
     make_label(lv_scr_act(), &style_subtitle, "Directions:",
                LV_ALIGN_TOP_LEFT, 20, 7);
+    printk("display: directions screen — header done\n");
 
     lv_obj_t *steps = lv_label_create(lv_scr_act());
+    if (steps == NULL) {
+        printk("ERROR: steps label NULL\n");
+        return;
+    }
     lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(steps, lv_pct(90));
     lv_obj_set_height(steps, LV_SIZE_CONTENT);
@@ -677,13 +698,19 @@ static void direction_screen(void)
         "4. Hit " LV_SYMBOL_PLAY " to proceed and select inputs.");
     lv_obj_add_style(steps, &style_body, 0);
     lv_obj_align(steps, LV_ALIGN_TOP_LEFT, 30, 35);
+    printk("display: directions screen — steps done\n");
 
     lv_obj_t *estop = lv_label_create(lv_scr_act());
+    if (estop == NULL) {
+        printk("ERROR: estop label NULL\n");
+        return;
+    }
     lv_label_set_long_mode(estop, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(estop, lv_pct(100));
     lv_label_set_text(estop, "* E-stop on right side of machine for emergency");
     lv_obj_add_style(estop, &style_body, 0);
     lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -2);
+    printk("display: directions screen — done\n");
 }
 
 /* ══════════════════════════════════════════════════════════════

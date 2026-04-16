@@ -74,8 +74,8 @@ void sm_transition(system_state_t new_state)
 
     /* Run entry function */
     switch (new_state) {
-        case STATE_IDLE:           idle_entry();           break;
         case STATE_HOMING:         homing_entry();         break;
+        case STATE_IDLE:           idle_entry();           break;
         case STATE_INITIALIZATION: initialization_entry(); break;
         case STATE_BEND:           bend_entry();           break;
         case STATE_COOL:           cool_entry();           break;
@@ -112,6 +112,7 @@ void idle_entry(void)
 void homing_entry(void)
 {
     printk("Entering HOMING\n");
+    //drv8452_enable();
     
     /* If already at home */
     if (limit_sw_is_pressed()){
@@ -139,6 +140,11 @@ void bend_entry(void)
     if(limit_sw_is_pressed()){
         printk("Bend entry: limit switch pressed \n");
         g_sm.error_code = ERR_STEPPER;
+    }
+
+    if (limit_sw_is_pressed()){
+        stepper_reset_position();
+        sm_transition(STATE_IDLE);
     }
 
     printk("Bend entry: motor enable, heater on \n");
