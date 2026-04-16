@@ -207,8 +207,8 @@ void encoder_init(void)
         printk("GPIOC not ready\n");
         return;
     }
-    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_UP);
-    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_pin_interrupt_configure(gpioc, 11, GPIO_INT_EDGE_FALLING);
     gpio_init_callback(&enc_cb_data, enc_isr, BIT(11));
     gpio_add_callback(gpioc, &enc_cb_data);
