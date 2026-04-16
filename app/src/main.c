@@ -2,6 +2,8 @@
 #include <zephyr/kernel.h>
 #include <zephyr/device.h>
 #include <zephyr/drivers/gpio.h>
+#include <zephyr/sys/reboot.h>
+#include <zephyr/drivers/hwinfo.h>
 #include "states/states.h"
 #include "display/display.h"
 #include "stepper/stepper.h"
@@ -137,8 +139,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
 
         case STATE_HEAT: {
-            #define TARGET_TEMP         10.0f
-            #define WARMUP_TIMEOUT_MS   120000
+            #define TARGET_TEMP         150.0f
             
             printk("HEAT: starting heater, target=%.1f C\n", (double)TARGET_TEMP);
             heater_start();
@@ -148,14 +149,6 @@ void state_thread(void *p1, void *p2, void *p3)
 
             /* Find target temperature */
             while(temp_get_ema() < TARGET_TEMP){
-                if(k_uptime_get() - warmup_start > WARMUP_TIMEOUT_MS){
-                    printk("HEAT: warmup timeout - heater fault \n");
-                    heater_stop();
-                    g_sm.error_code = ERROR_HEATER_TEMP;
-                    sm_transition(STATE_ERROR);
-                    heat_error = true;
-                    break;
-                }
                 printk("HEAT: current=%.1f C\n", (double)temp_get_ema());
                 k_sleep(K_MSEC(500));
 
@@ -253,8 +246,9 @@ void display_thread(void *p1, void *p2, void *p3)
     printk("Display thread started\n");
 
     if (display_init() != 0) {
-        printk("Failed to initialize display\n");
-        return;
+        printk("Display init failed — rebooting\n");
+        k_msleep(100);
+        sys_reboot(SYS_REBOOT_COLD);
     }
 
     size_t disp_stack_free;
@@ -279,7 +273,17 @@ void display_thread(void *p1, void *p2, void *p3)
 int main(void)
 {
     printk("=== Acrylix boot ===\n");
-    k_msleep(100);
+
+    uint32_t reset_cause = 0;
+    hwinfo_get_reset_cause(&reset_cause);
+    hwinfo_clear_reset_cause();
+    if (reset_cause & RESET_POR) {
+        printk("Cold boot (POR) — rebooting for display stabilization\n");
+        k_msleep(200);
+        sys_reboot(SYS_REBOOT_COLD);
+    }
+
+    k_msleep(1000);
 
     /* Hardware init */
     limit_sw_init();
@@ -292,8 +296,18 @@ int main(void)
         printk("stepper_init failed\n");
     }
 
+    /*const struct device *gpioc_dev = DEVICE_DT_GET(DT_NODELABEL(gpioc));
+    gpio_pin_configure(gpioc_dev, 7, GPIO_OUTPUT_ACTIVE);
+    k_msleep(10);
+    gpio_pin_set(gpioc_dev, 7, 0);  
+    k_msleep(20);
+    gpio_pin_set(gpioc_dev, 7, 1);
+    k_msleep(150);    */              
+
     sm_init();
     printk("sm_init done \n");
+
+    //sys_reboot(SYS_REBOOT_COLD);
 
     printk("creating state thread \n");
     k_tid_t state_tid = k_thread_create(

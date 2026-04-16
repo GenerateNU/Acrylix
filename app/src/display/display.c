@@ -27,7 +27,7 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 #define THICK_BAR_X2    140
 #define THICK_ACRYLIC_Y 147
 
-#define FWD_DEBOUNCE_MS     350
+#define FWD_DEBOUNCE_MS     400
 #define BCK_DEBOUNCE_MS     250
 
 /* ══════════════════════════════════════════════════════════════
@@ -200,7 +200,7 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
         enc_raw--;
     }
 
-    int new_count = enc_raw / 2;
+    int new_count = enc_raw / 5;
     if (new_count == enc_count) return;
 
     int delta = (new_count > enc_count) ? 1 : -1;
