@@ -139,37 +139,67 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
 
         case STATE_HEAT: {
-            #define TARGET_TEMP         150.0f
-            
+            #define TARGET_TEMP         150.0f   //make 150
+            #define WARMUP_TIMEOUT_MS   120000
+
             printk("HEAT: starting heater, target=%.1f C\n", (double)TARGET_TEMP);
             heater_start();
 
             bool heat_error = false;
             int64_t warmup_start = k_uptime_get();
 
-            /* Find target temperature */
-            while(temp_get_ema() < TARGET_TEMP){
+            /* Phase 1 — warmup: wait for target temperature */
+            while (temp_get_ema() < TARGET_TEMP) {
+                display_post_heat_temp(temp_get_ema());
                 printk("HEAT: current=%.1f C\n", (double)temp_get_ema());
                 k_sleep(K_MSEC(500));
-
+                if (k_uptime_get() - warmup_start > WARMUP_TIMEOUT_MS) {
+                    printk("HEAT: warmup timeout\n");
+                    heat_error = true;
+                    break;
+                }
             }
 
-            if (heat_error) break;
+            if (heat_error) {
+                heater_stop();
+                g_sm.error_code = ERROR_HEATER_TEMP;
+                sm_transition(STATE_ERROR);
+                break;
+            }
 
-            printk("HEAT: target temperature reached \n");
+            printk("HEAT: target temperature reached\n");
 
-            /* Start heating timer given thickness */
+            /* Phase 2 — soak: hold at temperature for thickness-dependent time */
             int heat_ms = (g_inputs.thickness == 1)
                           ? HEAT_TIME_1_8_MS
                           : HEAT_TIME_1_16_MS;
 
-            printk("Heating: %d ms (thickness=%s)\n",
+            printk("HEAT: soaking %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            k_sleep(K_MSEC(heat_ms));
+
+            k_sem_take(&display_screen_ready, K_MSEC(2000));
+            int64_t soak_start = k_uptime_get();
+            while (1) {
+                int64_t elapsed = k_uptime_get() - soak_start;
+                if (elapsed >= heat_ms) break;
+                int rem_ms = heat_ms - (int)elapsed;
+                g_progress.pct = (int)((elapsed * 100) / heat_ms);
+                g_progress.min = rem_ms / 60000;
+                g_progress.sec = (rem_ms % 60000) / 1000;
+                __DMB();
+                g_progress.pending = true;
+                k_sleep(K_MSEC(500));
+            }
+            g_progress.pct = 100;
+            g_progress.min = 0;
+            g_progress.sec = 0;
+            __DMB();
+            g_progress.pending = true;
+            k_sleep(K_MSEC(300));
 
             heater_stop();
-            printk("Heating done\n");
+            printk("HEAT: done\n");
             sm_transition(STATE_BEND);
             break;
         }
@@ -196,9 +226,28 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COOL: {
             printk("Cooling: %d ms\n", COOL_TIME_MS);
-            //run_countdown(COOL_TIME_MS);
+
+            k_sem_take(&display_screen_ready, K_MSEC(2000));
+            int64_t cool_start = k_uptime_get();
+            while (1) {
+                int64_t elapsed = k_uptime_get() - cool_start;
+                if (elapsed >= COOL_TIME_MS) break;
+                int rem_ms = COOL_TIME_MS - (int)elapsed;
+                g_progress.pct = (int)((elapsed * 100) / COOL_TIME_MS);
+                g_progress.min = rem_ms / 60000;
+                g_progress.sec = (rem_ms % 60000) / 1000;
+                __DMB();
+                g_progress.pending = true;
+                k_sleep(K_MSEC(500));
+            }
+            g_progress.pct = 100;
+            g_progress.min = 0;
+            g_progress.sec = 0;
+            __DMB();
+            g_progress.pending = true;
+            k_sleep(K_MSEC(300));
+
             g_sm.cool_complete = true;
-            k_sleep(K_MSEC(500));
             sm_transition(STATE_COMPLETE);
             break;
         }

@@ -83,6 +83,10 @@ static volatile bool         btn_bck_pressed = false;
 typedef enum {
     SM_SCREEN_DIRECTIONS = 0,
     SM_SCREEN_INPUT,
+    SM_SCREEN_HEAT,
+    SM_SCREEN_COOL,
+    SM_SCREEN_BEND,
+    SM_SCREEN_HOMING,
     SM_SCREEN_PROCESS,
     SM_SCREEN_COMPLETE,
     SM_SCREEN_ERROR
@@ -133,6 +137,26 @@ static volatile bool enc_angle_update_pending = false;
 static volatile int  enc_pending_angle        = 0;
 
 /* ══════════════════════════════════════════════════════════════
+ *  Heat screen elements
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_obj_t *heat_status_label = NULL;
+static lv_obj_t *heat_timer_label  = NULL;
+static lv_obj_t *heat_temp_label   = NULL;
+
+static struct {
+    volatile bool pending;
+    float         temp_c;
+} g_heat_temp;
+
+/* ══════════════════════════════════════════════════════════════
+ *  Cool screen elements
+ * ══════════════════════════════════════════════════════════════ */
+
+static lv_obj_t *cool_status_label = NULL;
+static lv_obj_t *cool_timer_label  = NULL;
+
+/* ══════════════════════════════════════════════════════════════
  *  Process screen elements
  * ══════════════════════════════════════════════════════════════ */
 
@@ -146,6 +170,7 @@ static lv_obj_t *bar                 = NULL;
  * ══════════════════════════════════════════════════════════════ */
 
 static lv_style_t style_screen;
+static lv_style_t style_header;
 static lv_style_t style_title;
 static lv_style_t style_subtitle;
 static lv_style_t style_body;
@@ -180,6 +205,10 @@ static const int16_t sin_lut[91] = {
 static void bend_anim_set_angle(int angle_deg);
 static void thick_anim_set(int idx);
 static void direction_screen(void);
+static void heat_screen(void);
+static void display_update_heat(int pct, int min, int sec);
+static void cool_screen(void);
+static void display_update_cool(int pct, int min, int sec);
 static void process_screen(const char *header, const char *value);
 int input_selection_next(void);
 int input_selection_prev(void);
@@ -200,7 +229,7 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
         enc_raw--;
     }
 
-    int new_count = enc_raw / 5;
+    int new_count = enc_raw / 4;
     if (new_count == enc_count) return;
 
     int delta = (new_count > enc_count) ? 1 : -1;
@@ -406,9 +435,13 @@ static void init_styles(void)
     lv_style_set_bg_color(&style_screen, lv_color_black());
     lv_style_set_bg_opa(&style_screen, LV_OPA_COVER);
 
+    lv_style_init(&style_header);
+    lv_style_set_text_color(&style_header, lv_color_white());
+    lv_style_set_text_font(&style_header, &lv_font_montserrat_40);
+
     lv_style_init(&style_title);
     lv_style_set_text_color(&style_title, lv_color_white());
-    lv_style_set_text_font(&style_title, &lv_font_montserrat_24);
+    lv_style_set_text_font(&style_title, &lv_font_montserrat_28);
 
     lv_style_init(&style_subtitle);
     lv_style_set_text_color(&style_subtitle, lv_color_white());
@@ -419,7 +452,7 @@ static void init_styles(void)
     lv_style_set_text_font(&style_body, &lv_font_montserrat_14);
 
     lv_style_init(&style_note);
-    lv_style_set_text_color(&style_note, lv_color_hex(0xAAAAAA));
+    lv_style_set_text_color(&style_note, lv_color_white());
     lv_style_set_text_font(&style_note, &lv_font_montserrat_12);
 
     styles_initialized = true;
@@ -454,6 +487,11 @@ static void clear_screen(void)
     process_value_label  = NULL;
     process_time_label   = NULL;
     process_pct_label    = NULL;
+    heat_status_label    = NULL;
+    heat_timer_label     = NULL;
+    heat_temp_label      = NULL;
+    cool_status_label    = NULL;
+    cool_timer_label     = NULL;
     on_directions_screen = false;
 
     /* Flush any pending LVGL refr/task work before deleting objects.
@@ -672,7 +710,7 @@ int display_init(void)
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  SCREEN 1 — Directions  (STATE_IDLE)
+ *  SCREEN — Directions  (STATE_IDLE)
  * ══════════════════════════════════════════════════════════════ */
 
 static void direction_screen(void)
@@ -718,7 +756,7 @@ static void direction_screen(void)
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  SCREEN 2 — Input selection  (STATE_INITIALIZATION)
+ *  SCREEN — Input selection  (STATE_INITIALIZATION)
  * ══════════════════════════════════════════════════════════════ */
 
 static void bend_radius_screen(void)
@@ -833,50 +871,118 @@ int input_selection_prev(void)
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  SCREEN 3 — Process  (STATE_BEND / STATE_COOL)
+ *  SCREEN — Heat  (STATE_HEAT)
  * ══════════════════════════════════════════════════════════════ */
 
-static void process_screen(const char *header, const char *value)
+static void heat_screen(void)
 {
-    printk("display: process screen (%s)\n", header);
+    printk("display: heat screen\n");
     clear_screen();
-    current_sm_screen = SM_SCREEN_PROCESS;
+    current_sm_screen = SM_SCREEN_HEAT;
 
-    make_label(lv_scr_act(), &style_title, header, LV_ALIGN_CENTER, 0, -50);
+    heat_status_label = make_label(lv_scr_act(), &style_title, "Heating...",
+                                   LV_ALIGN_CENTER, 0, -30);
 
-    process_value_label = make_label(lv_scr_act(), &style_title, value,
-                                     LV_ALIGN_CENTER, 0, -15);
+    heat_temp_label = make_label(lv_scr_act(), &style_title, "---.- C",
+                                 LV_ALIGN_CENTER, 0, 30);
 
-    process_time_label = make_label(lv_scr_act(), &style_subtitle,
-                                    "time remaining --:--",
-                                    LV_ALIGN_CENTER, 0, 20);
+    heat_timer_label = make_label(lv_scr_act(), &style_title, "",
+                                  LV_ALIGN_CENTER, 0, 30);
 
-    bar = lv_bar_create(lv_scr_act());
-    lv_obj_set_size(bar, 200, 20);
-    lv_obj_align(bar, LV_ALIGN_CENTER, 0, 50);
-    lv_bar_set_range(bar, 0, 100);
-    lv_bar_set_value(bar, 0, LV_ANIM_OFF);
+    make_label(lv_scr_act(), &style_note, "Do not remove acrylic",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
 
-    /* Gray background track */
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x444444), LV_PART_MAIN);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_MAIN);
-    lv_obj_set_style_radius(bar, 4, LV_PART_MAIN);
-    lv_obj_set_style_border_width(bar, 0, LV_PART_MAIN);
+    k_sem_give(&display_screen_ready);
+}
 
-    /* Green fill indicator */
-    lv_obj_set_style_bg_color(bar, lv_color_hex(0x00AA00), LV_PART_INDICATOR);
-    lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
-    lv_obj_set_style_radius(bar, 4, LV_PART_INDICATOR);
+static void display_update_heat(int pct, int min, int sec)
+{
+    if (heat_timer_label == NULL) return;
+    if (pct > 0) {
+        char time_buf[16];
+        snprintf(time_buf, sizeof(time_buf), "%02d:%02d", min, sec);
+        lv_label_set_text(heat_timer_label, time_buf);
+        if (heat_status_label != NULL) lv_label_set_text(heat_status_label, "Heating...");
+        if (heat_temp_label   != NULL) lv_label_set_text(heat_temp_label,   "");
+    }
+}
 
-    process_pct_label = make_label(lv_scr_act(), &style_body, "0%",
-                                   LV_ALIGN_CENTER, 0, 75);
+static void display_update_heat_temp(float temp_c)
+{
+    if (heat_temp_label == NULL) return;
+    char buf[16];
+    snprintf(buf, sizeof(buf), "%.1f C", (double)temp_c);
+    lv_label_set_text(heat_temp_label, buf);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN — Cool  (STATE_COOL)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void cool_screen(void)
+{
+    printk("display: cool screen\n");
+    clear_screen();
+    current_sm_screen = SM_SCREEN_COOL;
+
+    cool_status_label = make_label(lv_scr_act(), &style_title, "Cooling...",
+                                   LV_ALIGN_CENTER, 0, -40);
+
+    cool_timer_label = make_label(lv_scr_act(), &style_title, "--:--",
+                                  LV_ALIGN_CENTER, 0, 15);
+
+    make_label(lv_scr_act(), &style_note, "Do not remove acrylic",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
+
+    k_sem_give(&display_screen_ready);
+}
+
+static void display_update_cool(int pct, int min, int sec)
+{
+    ARG_UNUSED(pct);
+    if (cool_timer_label == NULL) return;
+    char time_buf[16];
+    snprintf(time_buf, sizeof(time_buf), "%02d:%02d", min, sec);
+    lv_label_set_text(cool_timer_label, time_buf);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN - Bend  (STATE_BEND)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void bend_screen(void)
+{
+    printk("display: bend screen\n");
+    clear_screen();
+    current_sm_screen = SM_SCREEN_BEND;
+
+    make_label(lv_scr_act(), &style_header, "Bending...", LV_ALIGN_CENTER, 0, 0);
+
+    make_label(lv_scr_act(), &style_note, "Do not remove acrylic",
+               LV_ALIGN_BOTTOM_MID, 0, -15);
 
     /* Signal run_countdown() that all LVGL objects are live. */
     k_sem_give(&display_screen_ready);
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  SCREEN 4 — Complete  (STATE_COMPLETE)
+ *  SCREEN — Homing  (STATE_HOMING)
+ * ══════════════════════════════════════════════════════════════ */
+
+static void homing_screen(void)
+{
+    printk("display: homing screen\n");
+    clear_screen();
+    current_sm_screen = SM_SCREEN_HOMING;
+
+    make_label(lv_scr_act(), &style_header, "Homing...", LV_ALIGN_CENTER, 0, 0);
+
+    /* Signal run_countdown() that all LVGL objects are live. */
+    k_sem_give(&display_screen_ready);
+}
+
+/* ══════════════════════════════════════════════════════════════
+ *  SCREEN — Complete  (STATE_COMPLETE)
  * ══════════════════════════════════════════════════════════════ */
 
 static void complete_screen(void)
@@ -895,7 +1001,7 @@ static void complete_screen(void)
 }
 
 /* ══════════════════════════════════════════════════════════════
- *  SCREEN 5 — Error  (STATE_ERROR)
+ *  SCREEN — Error  (STATE_ERROR)
  * ══════════════════════════════════════════════════════════════ */
 
 static void error_screen(const char *msg)
@@ -926,12 +1032,12 @@ void display_set_state(int state)
     switch (state) {
         case STATE_IDLE:           direction_screen();                 break;
         case STATE_INITIALIZATION: input_selection_enter();            break;
-        case STATE_HEAT:           process_screen("Heating...", "");   break;
-        case STATE_BEND:           process_screen("Bending...", "");   break;
-        case STATE_COOL:           process_screen("Cooling...", "");   break;
+        case STATE_HEAT:           heat_screen();                      break;
+        case STATE_BEND:           bend_screen();                      break;
+        case STATE_COOL:           cool_screen();                      break;
         case STATE_COMPLETE:       complete_screen();                  break;
         case STATE_ERROR:          error_screen("An error occurred."); break;
-        case STATE_HOMING:         process_screen("Homing...", "");    break;
+        case STATE_HOMING:         homing_screen();                    break;
         default: break;
     }
 }
@@ -959,12 +1065,18 @@ static void display_update_progress(int pct, int min, int sec)
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
 }
 
-/* Called from state thread — posts to mailbox, display thread applies it. */
-/* Called from state thread — posts bend progress to mailbox. */
 void display_post_bend_progress(float fraction)
 {
     g_bend_progress.fraction = fraction;
+    __DMB();
     g_bend_progress.pending  = true;
+}
+
+void display_post_heat_temp(float temp_c)
+{
+    g_heat_temp.temp_c = temp_c;
+    __DMB();
+    g_heat_temp.pending = true;
 }
 
 /* Called from display thread only — touches LVGL directly. */
@@ -1001,11 +1113,23 @@ void display_update(void)
         bend_anim_set_angle(enc_pending_angle);
     }
 
-    /* Handle countdown progress updates from run_countdown() */
+    /* Handle countdown progress updates */
     if (g_progress.pending) {
         g_progress.pending = false;
         __DMB();
-        display_update_progress(g_progress.pct, g_progress.min, g_progress.sec);
+        if (current_sm_screen == SM_SCREEN_HEAT) {
+            display_update_heat(g_progress.pct, g_progress.min, g_progress.sec);
+        } else if (current_sm_screen == SM_SCREEN_COOL) {
+            display_update_cool(g_progress.pct, g_progress.min, g_progress.sec);
+        } else {
+            display_update_progress(g_progress.pct, g_progress.min, g_progress.sec);
+        }
+    }
+
+    /* Handle heat temperature updates from state thread */
+    if (g_heat_temp.pending) {
+        g_heat_temp.pending = false;
+        display_update_heat_temp(g_heat_temp.temp_c);
     }
 
     /* Handle bend-fraction progress updates from state thread */

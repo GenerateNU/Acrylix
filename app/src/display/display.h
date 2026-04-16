@@ -77,6 +77,13 @@ void display_update_value(const char *value);
  */
 void display_post_bend_progress(float fraction);
 
+/**
+ * @brief Post a temperature update from the state thread during warmup.
+ *        Thread-safe: writes to a mailbox consumed by display_update().
+ * @param temp_c  Current temperature in degrees C.
+ */
+void display_post_heat_temp(float temp_c);
+
 /* ══════════════════════════════════════════════════════════════
  *  Encoder public API
  * ══════════════════════════════════════════════════════════════ */
