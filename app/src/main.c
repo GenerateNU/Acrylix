@@ -8,6 +8,7 @@
 #include "stepper/limit_sw.h"
 #include "stepper/drv8452_spi.h"
 #include "temp/temp_control.h"
+#include "temp/temp_sensor.h"
 #include "app_events.h"
 
 /* ══════════════════════════════════════════════════════════════
@@ -280,7 +281,9 @@ int main(void)
     printk("=== Acrylix boot ===\n");
     k_msleep(100);
 
+    /* Hardware init */
     limit_sw_init();
+    temp_init();
 
     if (drv8452_spi_init() != 0) {
         printk("drv8452_spi_init failed\n");
@@ -309,9 +312,6 @@ int main(void)
         DISPLAY_PRIORITY, 0, K_NO_WAIT);
     k_thread_name_set(display_tid, "display");
     printk("Display thread created\n");
-
-    // temp_init();
-    // heater_start();
 
     // /* SSR toggle test — PC9 high/low every 2 seconds */
     // const struct device *gpioc = DEVICE_DT_GET(DT_NODELABEL(gpioc));
