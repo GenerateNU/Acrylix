@@ -127,6 +127,10 @@ static lv_obj_t *thick_bar_line           = NULL;
 static lv_obj_t *thick_value_label        = NULL;
 static volatile bool thick_update_pending = false;
 
+/* ── Deferred encoder angle update (ISR → display thread) ── */
+static volatile bool enc_angle_update_pending = false;
+static volatile int  enc_pending_angle        = 0;
+
 /* ══════════════════════════════════════════════════════════════
  *  Process screen elements
  * ══════════════════════════════════════════════════════════════ */
@@ -201,12 +205,13 @@ static void enc_isr(const struct device *dev, struct gpio_callback *cb,
     int delta = (new_count > enc_count) ? 1 : -1;
     enc_count = new_count;
 
-    /* Bend angle screen */
+    /* Bend angle screen — defer LVGL update to display thread */
     if (anim_fixed_bot != NULL) {
         sel_bend_angle += delta;
         if (sel_bend_angle < 0)  sel_bend_angle = 0;
         if (sel_bend_angle > 90) sel_bend_angle = 90;
-        bend_anim_set_angle(sel_bend_angle);
+        enc_pending_angle = sel_bend_angle;
+        enc_angle_update_pending = true;
         printk("Bend angle: %d deg\n", sel_bend_angle);
         return;
     }
@@ -988,6 +993,12 @@ void display_update(void)
     if (thick_update_pending) {
         thick_update_pending = false;
         thick_anim_set(sel_thickness);
+    }
+
+    /* Handle deferred encoder angle updates from enc_isr() */
+    if (enc_angle_update_pending) {
+        enc_angle_update_pending = false;
+        bend_anim_set_angle(enc_pending_angle);
     }
 
     /* Handle countdown progress updates from run_countdown() */
