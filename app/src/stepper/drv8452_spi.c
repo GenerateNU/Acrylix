@@ -33,11 +33,21 @@
 #include <zephyr/sys/printk.h>
 #include "drv8452_spi.h"
 
-/* ── Pin assignments ────────────────────────────────────────────────────── */
-#define SPI_NCS_PIN   6   /* PB6  — nCS,  active low                        */
-#define SPI_SCLK_PIN  7   /* PB7  — SCLK, idle low                          */
-#define SPI_MOSI_PIN  8   /* PB8  — MOSI                                     */
-#define SPI_MISO_PIN  5   /* PB5  — MISO (freed from smoke LED in main.c)   */
+/* ── DIAGNOSTIC: alternate pin assignments ──────────────────────────────
+ * Moved from GPIOB (PB5-PB8) to GPIOC (PC0-PC3) to test whether the
+ * original PB6/PB8 pins conflict with the display CS/DC lines.
+ *
+ * IMPORTANT: The engineer must verify from the PCB schematic that
+ * PC0-PC3 are routed to accessible pads and are not used by other
+ * peripherals. If different free pins are available, update below.
+ *
+ * Original pins (commented for reference):
+ *   PB6 = nCS, PB7 = SCLK, PB8 = MOSI, PB5 = MISO
+ * ────────────────────────────────────────────────────────────────────── */
+#define SPI_NCS_PIN   0   /* PC0  — nCS  (was PB6)                          */
+#define SPI_SCLK_PIN  1   /* PC1  — SCLK (was PB7)                          */
+#define SPI_MOSI_PIN  2   /* PC2  — MOSI (was PB8)                          */
+#define SPI_MISO_PIN  3   /* PC3  — MISO (was PB5)                          */
 
 static const struct device *bb_gpio;
 
@@ -54,7 +64,7 @@ static const struct device *bb_gpio;
 
 static void bb_spi_init(void)
 {
-    bb_gpio = DEVICE_DT_GET(DT_NODELABEL(gpiob));
+    bb_gpio = DEVICE_DT_GET(DT_NODELABEL(gpioc));
     gpio_pin_configure(bb_gpio, SPI_NCS_PIN,  GPIO_OUTPUT_HIGH);
     gpio_pin_configure(bb_gpio, SPI_SCLK_PIN, GPIO_OUTPUT_LOW);
     gpio_pin_configure(bb_gpio, SPI_MOSI_PIN, GPIO_OUTPUT_LOW);
