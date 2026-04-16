@@ -1,24 +1,3 @@
-/*
- * stepper.c — NEMA 23 via DRV8452, interrupt-driven step counting
- *
- * Motor : 23HS22-4004-ME1K  (1.8°/step = 200 full steps/rev)
- * Driver: DRV8452  |  Supply: 24 V  |  Microstep: 1/32 (CTRL2=0x06)
- *         → 6400 steps/rev
- *
- * How it works:
- *   - PWM runs continuously on TIM1_CH1 (PA8) while moving
- *   - A GPIO interrupt on the STEP pin counts each pulse
- *   - When the target count is reached the ISR kills the PWM and posts
- *     a semaphore so the calling thread can block (yields CPU) instead
- *     of busy-waiting
- *   - If the feedback pin is not wired, moves complete via open-loop timeout
- *
- * Overlay additions needed (zephyr_user node):
- *   pwms       = <&timers1 1 PERIOD_NS PWM_POLARITY_NORMAL>;
- *   dir-gpios  = <&gpiob 10 GPIO_ACTIVE_HIGH>;
- *   step-gpios = <&gpioa 8  GPIO_ACTIVE_HIGH>;   // feedback pin for counting
- */
-
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/gpio.h>
@@ -28,9 +7,8 @@
 /* ── Device tree ──────────────────────────────────────────────────────────── */
 #define ZEPHYR_USER_NODE DT_PATH(zephyr_user)
 
-static const struct pwm_dt_spec  step_pwm  = PWM_DT_SPEC_GET(ZEPHYR_USER_NODE);
-static const struct gpio_dt_spec dir_pin   = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, dir_gpios);
-static const struct gpio_dt_spec step_fb   = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, step_gpios);
+static const struct pwm_dt_spec  step_pwm = PWM_DT_SPEC_GET(ZEPHYR_USER_NODE);
+static const struct gpio_dt_spec dir_pin  = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, dir_gpios);
 
 /* ── Motor config ─────────────────────────────────────────────────────────── */
 #define FULL_STEPS_PER_REV  200UL
@@ -40,28 +18,12 @@ static const struct gpio_dt_spec step_fb   = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, 
 #define DIR_FORWARD     1
 #define DIR_BACKWARD    0
 
-/* ── ISR state (shared between ISR and thread — volatile + atomic) ────────── */
-static volatile long        g_target_steps = 0;   /* steps remaining */
+/* ── Move state ───────────────────────────────────────────────────────────── */
 static volatile long g_total_steps = 0;
-static struct k_sem         g_move_done;
-static struct gpio_callback g_step_cb;
+static struct k_sem  g_move_done;
 
 /* ── Position tracking ────────────────────────────────────────────────────── */
 static long g_current_steps = 0;
-
-/* ── Step ISR ─────────────────────────────────────────────────────────────── */
-static void step_isr(const struct device *dev, struct gpio_callback *cb, uint32_t pins)
-{
-    ARG_UNUSED(dev); ARG_UNUSED(cb); ARG_UNUSED(pins);
-
-    g_target_steps--;
-
-    if (g_target_steps <= 0) {
-        /* Stop PWM — 0 pulse width = output held low */
-        pwm_set_dt(&step_pwm, 312500u, 0u);
-        k_sem_give(&g_move_done);   /* wake the waiting thread */
-    }
-}
 
 /* ── Init ─────────────────────────────────────────────────────────────────── */
 int stepper_init(void)
@@ -70,18 +32,15 @@ int stepper_init(void)
         printk("STEP PWM not ready\n");
         return -ENODEV;
     }
-    if (!gpio_is_ready_dt(&dir_pin) || !gpio_is_ready_dt(&step_fb)) {
-        printk("Stepper GPIO not ready\n");
+    if (!gpio_is_ready_dt(&dir_pin)) {
+        printk("Stepper DIR GPIO not ready\n");
         return -ENODEV;
     }
 
     k_sem_init(&g_move_done, 0, 1);
 
-    /* DIR pin: output, default forward */
+    /* DIR pin: output, default low (backward) until first move */
     gpio_pin_configure_dt(&dir_pin, GPIO_OUTPUT_INACTIVE);
-    gpio_pin_interrupt_configure_dt(&step_fb, GPIO_INT_EDGE_RISING);
-    gpio_init_callback(&g_step_cb, step_isr, BIT(step_fb.pin));
-    gpio_add_callback(step_fb.port, &g_step_cb);
 
     printk("Stepper init OK — %lu steps/rev (1/%lu microstep)\n",
            STEPS_PER_REV, MICROSTEPS);
@@ -96,11 +55,10 @@ static void do_move(long steps, uint32_t period_ns, int dir)
     gpio_pin_set_dt(&dir_pin, dir);
     k_msleep(1);   /* DIR settle */
 
-    g_target_steps = steps;
     g_total_steps = steps;
 
-    /* Open-loop timeout: expected move time * 2 + 500 ms */
-    uint32_t timeout_ms = (uint32_t)(((uint64_t)steps * period_ns) / 1000000ULL) * 2U + 500U;
+    /* Open-loop: run for exactly the expected move duration + 200 ms margin */
+    uint32_t timeout_ms = (uint32_t)(((uint64_t)steps * period_ns) / 1000000ULL) + 200U;
 
     k_sem_reset(&g_move_done);
     pwm_set_dt(&step_pwm, period_ns, pulse_ns);
@@ -115,9 +73,8 @@ static void do_move(long steps, uint32_t period_ns, int dir)
 void stepper_emergency_stop(void)
 {
     pwm_set_dt(&step_pwm, 312500u, 0u);
-    g_target_steps = 0;
     k_sem_give(&g_move_done);
-    printk("Stepper: emergencyt stop \n");
+    printk("Stepper: emergency stop\n");
 }
 
 /* ── Homing of motor ───────────── */
@@ -130,11 +87,8 @@ void stepper_reset_position(void)
 /* ── Gets progress of stepper for the UI ───────────── */
 float stepper_get_progress(void)
 {
-    if (g_total_steps <= 0) return 1.0f;
-    long done = g_total_steps - g_target_steps;
-    if (done < 0) done = 0;
-    float pct = (float)done / (float)g_total_steps;
-    return pct > 1.0f ? 1.0f : pct;
+    /* Step ISR removed — progress not available in open-loop mode */
+    return 0.0f;
 }
 /* ── Public API ───────────────────────────────────────────────────────────── */
 
@@ -148,7 +102,7 @@ void stepper_move_degrees(float degrees, float rpm)
     if (degrees == 0.0f) return;
 
     // Account for discrepancies in micro-stepping (quick and dirty fix)
-    degrees = degrees / 2.0f; 
+    degrees = degrees / 2.0f;
 
     float abs_deg = degrees > 0.0f ? degrees : -degrees;
     long  steps   = (long)((abs_deg / 360.0f) * (float)STEPS_PER_REV);
