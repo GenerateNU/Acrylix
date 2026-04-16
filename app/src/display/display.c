@@ -36,6 +36,27 @@ LOG_MODULE_REGISTER(display, LOG_LEVEL_INF);
 static const struct device *display_dev;
 
 /* ══════════════════════════════════════════════════════════════
+ *  Screen-ready synchronisation
+ *  process_screen() gives this semaphore after building all LVGL
+ *  objects.  run_countdown() takes it before its first g_progress
+ *  write, so the display thread can never receive a progress update
+ *  against a partially-constructed (or not-yet-constructed) screen.
+ * ══════════════════════════════════════════════════════════════ */
+
+K_SEM_DEFINE(display_screen_ready, 0, 1);
+
+/* ══════════════════════════════════════════════════════════════
+ *  Bend progress mailbox (separate from g_progress in app_events.h)
+ *  Written by state thread via display_post_bend_progress(),
+ *  consumed by display thread in display_update().
+ * ══════════════════════════════════════════════════════════════ */
+
+static struct {
+    volatile bool pending;
+    float fraction;
+} g_bend_progress;
+
+/* ══════════════════════════════════════════════════════════════
  *  Encoder state  (PC10 = A, PC11 = B)
  * ══════════════════════════════════════════════════════════════ */
 
@@ -93,10 +114,10 @@ static lv_obj_t  *anim_fixed_top;
 static lv_obj_t  *anim_moving_bot;
 static lv_obj_t  *anim_moving_top;
 static lv_obj_t  *anim_value_label;
-static lv_point_precise_t anim_fixed_bot_pts[2];
-static lv_point_precise_t anim_fixed_top_pts[2];
-static lv_point_precise_t anim_moving_bot_pts[2];
-static lv_point_precise_t anim_moving_top_pts[2];
+static lv_point_t anim_fixed_bot_pts[2];
+static lv_point_t anim_fixed_top_pts[2];
+static lv_point_t anim_moving_bot_pts[2];
+static lv_point_t anim_moving_top_pts[2];
 
 /* ══════════════════════════════════════════════════════════════
  *  Thickness animation elements
@@ -207,8 +228,8 @@ void encoder_init(void)
         printk("GPIOC not ready\n");
         return;
     }
-    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_DOWN);
-    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_pin_configure(gpioc, 10, GPIO_INPUT | GPIO_PULL_UP);
+    gpio_pin_configure(gpioc, 11, GPIO_INPUT | GPIO_PULL_UP);
     gpio_pin_interrupt_configure(gpioc, 11, GPIO_INT_EDGE_FALLING);
     gpio_init_callback(&enc_cb_data, enc_isr, BIT(11));
     gpio_add_callback(gpioc, &enc_cb_data);
@@ -263,8 +284,8 @@ void buttons_init(void)
         printk("GPIOB not ready\n");
         return;
     }
-    gpio_pin_configure(gpiob, 10, GPIO_INPUT);
-    gpio_pin_configure(gpiob, 15, GPIO_INPUT);
+    gpio_pin_configure(gpiob, 10, GPIO_INPUT | GPIO_PULL_DOWN);
+    gpio_pin_configure(gpiob, 15, GPIO_INPUT | GPIO_PULL_DOWN);
     gpio_pin_interrupt_configure(gpiob, 10, GPIO_INT_EDGE_BOTH);
     gpio_pin_interrupt_configure(gpiob, 15, GPIO_INT_EDGE_BOTH);
     gpio_init_callback(&btn_fwd_cb_data, btn_fwd_isr, BIT(10));
@@ -299,6 +320,12 @@ static void button_pressed(void)
             return;
         }
 
+       /* Process screen — buttons do nothing during heating/bending/cooling */
+        if (current_sm_screen == SM_SCREEN_PROCESS) {
+            printk(">>> Button ignored during process screen\n");
+            return;
+        }
+
         /* Input selection screens */
         printk(">>> Forward (step %d -> %d)\n", input_step, input_step + 1);
         int ret = input_selection_next();
@@ -318,6 +345,12 @@ static void button_pressed(void)
         btn_bck_pressed = false;
 
         if (on_directions_screen || current_sm_screen == SM_SCREEN_COMPLETE) {
+            return;
+        }
+
+        /* Process screen — back button also does nothing */
+        if (current_sm_screen == SM_SCREEN_PROCESS) {
+            printk(">>> Button ignored during process screen\n");
             return;
         }
 
@@ -416,7 +449,18 @@ static void clear_screen(void)
     process_time_label   = NULL;
     process_pct_label    = NULL;
     on_directions_screen = false;
+
+    /* Flush any pending LVGL refr/task work before deleting objects.
+     * Without this, LVGL's internal refresh queue can hold pointers to
+     * objects we are about to free, causing a crash on the next
+     * lv_task_handler() call. */
+    lv_task_handler();
+
     lv_obj_clean(lv_scr_act());
+
+    /* Remove previously-applied styles so we don't accumulate duplicates
+     * across multiple screen transitions, then re-apply the base style. */
+    lv_obj_remove_style_all(lv_scr_act());
     lv_obj_add_style(lv_scr_act(), &style_screen, 0);
 }
 
@@ -432,6 +476,10 @@ static lv_obj_t *make_label(lv_obj_t *parent,
                              lv_coord_t y_ofs)
 {
     lv_obj_t *lbl = lv_label_create(parent);
+    if (lbl == NULL) {
+        printk("ERROR: lv_label_create returned NULL (LVGL pool exhausted?)\n");
+        return NULL;
+    }
     lv_label_set_text(lbl, text);
     lv_obj_add_style(lbl, style, 0);
     lv_obj_align(lbl, align, x_ofs, y_ofs);
@@ -556,7 +604,7 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    static lv_point_precise_t base_pts[2] = {
+    static lv_point_t base_pts[2] = {
         {THICK_BAR_X, THICK_BASE_Y},
         {THICK_BAR_X2, THICK_BASE_Y}
     };
@@ -566,7 +614,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    static lv_point_precise_t acrylic_pts[2] = {
+    static lv_point_t acrylic_pts[2] = {
         {THICK_BAR_X, THICK_ACRYLIC_Y},
         {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
@@ -625,15 +673,21 @@ int display_init(void)
 
 static void direction_screen(void)
 {
-    printk("display: directions screen\n");
+    printk("display: directions screen — enter\n");
     clear_screen();
+    printk("display: directions screen — clear done\n");
     current_sm_screen    = SM_SCREEN_DIRECTIONS;
     on_directions_screen = true;
 
     make_label(lv_scr_act(), &style_subtitle, "Directions:",
                LV_ALIGN_TOP_LEFT, 20, 7);
+    printk("display: directions screen — header done\n");
 
     lv_obj_t *steps = lv_label_create(lv_scr_act());
+    if (steps == NULL) {
+        printk("ERROR: steps label NULL\n");
+        return;
+    }
     lv_label_set_long_mode(steps, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(steps, lv_pct(90));
     lv_obj_set_height(steps, LV_SIZE_CONTENT);
@@ -644,13 +698,19 @@ static void direction_screen(void)
         "4. Hit " LV_SYMBOL_PLAY " to proceed and select inputs.");
     lv_obj_add_style(steps, &style_body, 0);
     lv_obj_align(steps, LV_ALIGN_TOP_LEFT, 30, 35);
+    printk("display: directions screen — steps done\n");
 
     lv_obj_t *estop = lv_label_create(lv_scr_act());
+    if (estop == NULL) {
+        printk("ERROR: estop label NULL\n");
+        return;
+    }
     lv_label_set_long_mode(estop, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(estop, lv_pct(100));
     lv_label_set_text(estop, "* E-stop on right side of machine for emergency");
     lv_obj_add_style(estop, &style_body, 0);
     lv_obj_align(estop, LV_ALIGN_BOTTOM_LEFT, 13, -2);
+    printk("display: directions screen — done\n");
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -806,6 +866,9 @@ static void process_screen(const char *header, const char *value)
 
     process_pct_label = make_label(lv_scr_act(), &style_body, "0%",
                                    LV_ALIGN_CENTER, 0, 75);
+
+    /* Signal run_countdown() that all LVGL objects are live. */
+    k_sem_give(&display_screen_ready);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -858,6 +921,7 @@ void display_set_state(int state)
 {
     switch (state) {
         case STATE_IDLE:           direction_screen();                 break;
+        case STATE_HOMING:         direction_screen();                 break;
         case STATE_INITIALIZATION: input_selection_enter();            break;
         case STATE_BEND:           process_screen("Heating...", "");   break;
         case STATE_COOL:           process_screen("Cooling...", "");   break;
@@ -878,28 +942,38 @@ void display_update_value(const char *value)
         lv_label_set_text(process_value_label, value);
 }
 
-void display_update_progress(int pct, int min, int sec)
+/* Called from display thread only — touches LVGL directly. */
+static void display_update_progress(int pct, int min, int sec)
 {
     if (bar == NULL) return;
     char time_buf[32];
     char pct_buf[8];
     snprintf(time_buf, sizeof(time_buf), "time remaining %02d:%02d", min, sec);
     snprintf(pct_buf,  sizeof(pct_buf),  "%d%%", pct);
-    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
     if (process_time_label != NULL) lv_label_set_text(process_time_label, time_buf);
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
 }
 
-/* Update progress bar based off stepper - bend angle */
-void display_update_bend_progress(float fraction)
+/* Called from state thread — posts to mailbox, display thread applies it. */
+/* Called from state thread — posts bend progress to mailbox. */
+void display_post_bend_progress(float fraction)
+{
+    g_bend_progress.fraction = fraction;
+    g_bend_progress.pending  = true;
+}
+
+/* Called from display thread only — touches LVGL directly. */
+static void display_update_bend_progress(float fraction)
 {
     if (bar == NULL) return;
     int pct = (int)(fraction * 100.0f);
+    if (pct < 0)   pct = 0;
     if (pct > 100) pct = 100;
 
     char pct_buf[8];
     snprintf(pct_buf, sizeof(pct_buf), "%d%%", pct);
-    lv_bar_set_value(bar, pct, LV_ANIM_ON);
+    lv_bar_set_value(bar, pct, LV_ANIM_OFF);
     if (process_pct_label  != NULL) lv_label_set_text(process_pct_label,  pct_buf);
     if (process_time_label != NULL) lv_label_set_text(process_time_label, "bending...");
 }
@@ -915,6 +989,25 @@ void display_update(void)
     if (thick_update_pending) {
         thick_update_pending = false;
         thick_anim_set(sel_thickness);
+    }
+
+    /* Handle countdown progress updates from run_countdown() */
+    if (g_progress.pending) {
+        g_progress.pending = false;
+        __DMB();
+        display_update_progress(g_progress.pct, g_progress.min, g_progress.sec);
+    }
+
+    /* Handle bend-fraction progress updates from state thread */
+    if (g_progress.bend_pending) {
+        g_progress.bend_pending = false;
+        display_update_bend_progress(g_progress.bend_fraction);
+    }
+
+    /* Handle bend progress updates from state thread */
+    if (g_bend_progress.pending) {
+        g_bend_progress.pending = false;
+        display_update_bend_progress(g_bend_progress.fraction);
     }
 
     lv_task_handler();

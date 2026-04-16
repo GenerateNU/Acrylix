@@ -8,6 +8,7 @@
 #include "stepper/limit_sw.h"
 #include "stepper/drv8452_spi.h"
 #include "temp/temp_control.h"
+#include "app_events.h"
 
 /* ══════════════════════════════════════════════════════════════
  *  Heating time constants
@@ -36,9 +37,9 @@ K_MSGQ_DEFINE(display_queue, sizeof(display_msg_t),  4, 4);
  *  Thread config
  * ══════════════════════════════════════════════════════════════ */
 
-#define STATE_STACK_SIZE    4096
+#define STATE_STACK_SIZE    8192
 #define STATE_PRIORITY      7
-#define DISPLAY_STACK_SIZE  12288
+#define DISPLAY_STACK_SIZE  20480   /* 20KB — debug optimizations inflate stack frames */
 #define DISPLAY_PRIORITY    6
 
 K_THREAD_STACK_DEFINE(state_stack,   STATE_STACK_SIZE);
@@ -52,21 +53,36 @@ static struct k_thread display_thread_data;
 
 static void run_countdown(int total_ms)
 {
+    /* Wait until process_screen() has finished building all LVGL objects.
+     * sm_transition() posts to display_queue and returns immediately, so
+     * run_countdown() can be entered before the display thread has had a
+     * chance to drain the queue and call process_screen().  Taking this
+     * semaphore (given by process_screen at the end) ensures we never
+     * write g_progress while bar/labels are still NULL. */
+    k_sem_take(&display_screen_ready, K_MSEC(2000));
+
     int64_t start = k_uptime_get();
     while (1) {
         int64_t elapsed = k_uptime_get() - start;
         if (elapsed >= total_ms) break;
 
-        int pct    = (int)((elapsed * 100) / total_ms);
         int rem_ms = total_ms - (int)elapsed;
-        int min    = rem_ms / 60000;
-        int sec    = (rem_ms % 60000) / 1000;
 
-        display_update_progress(pct, min, sec);
+        /* Write to shared struct — display thread reads it */
+        g_progress.pct = (int)((elapsed * 100) / total_ms);
+        g_progress.min = rem_ms / 60000;
+        g_progress.sec = (rem_ms % 60000) / 1000;
+        __DMB();
+        g_progress.pending = true;
+
         k_sleep(K_MSEC(250));
     }
-    display_update_progress(100, 0, 0);
-    k_sleep(K_MSEC(500));   /* brief pause so user sees 100% */
+    g_progress.pct = 100;
+    g_progress.min = 0;
+    g_progress.sec = 0;
+    __DMB();
+    g_progress.pending = true;
+    k_sleep(K_MSEC(500));
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -76,10 +92,55 @@ static void run_countdown(int total_ms)
 void state_thread(void *p1, void *p2, void *p3)
 {
     ARG_UNUSED(p1); ARG_UNUSED(p2); ARG_UNUSED(p3);
-    printk("State thread started\n");
+    size_t stack_free;
+    k_thread_stack_space_get(k_current_get(), &stack_free);
+    printk("State thread started, stack free: %zu\n", stack_free);
 
     while (1) {
         switch (g_sm.current) {
+
+       /* ── HOMING ───────────────────────────────────────────
+         * Placeholder — skip to IDLE for now.
+         * ─────────────────────────────────────────────────── */
+        case STATE_HOMING: {
+            bool homing_error = false;
+            float tot_moved = 0.0f;
+
+            if (limit_sw_is_pressed()) {
+                printk("Homing: already at home\n");
+                stepper_reset_position();
+                //stepper_move_degrees(2.0f, HOME_RPM);
+                stepper_reset_position();
+                sm_transition(STATE_INITIALIZATION);
+                break;
+            }
+
+            printk("Homing: moving backward\n");
+            while (!limit_sw_is_pressed()) {
+                //stepper_move_degrees(-2.0f, HOME_RPM);
+                tot_moved += 2.0f;
+                printk("moving: %.1f deg\n", (double)tot_moved);
+
+                if (tot_moved >= HOME_MAX_DEG) {
+                    printk("Homing: limit switch not found after %.1f deg\n",
+                           (double)tot_moved);
+                    g_sm.error_code = ERROR_HOMING_FAILED;
+                    sm_transition(STATE_ERROR);
+                    homing_error = true;
+                    break;
+                }
+            }
+
+            if (!homing_error) {
+                printk("Homing: home found after %.1f deg\n", (double)tot_moved);
+                stepper_reset_position();
+                //stepper_move_degrees(2.0f, HOME_RPM);
+                stepper_reset_position();
+                sm_transition(STATE_INITIALIZATION);
+            }
+            break;
+        }
+
 
         /* ── IDLE ─────────────────────────────────────────────
          * Directions screen shown. Wait for forward button
@@ -114,67 +175,32 @@ void state_thread(void *p1, void *p2, void *p3)
         }
 
         /* ── BEND ─────────────────────────────────────────────
-         * Phase 1: heating countdown (duration from thickness).
-         * Phase 2: bending countdown (BEND_TIME_MS).
+         * Phase 1: heat the acrylic (blocking sleep).
+         * Phase 2: move motor to the user-selected bend angle.
+         * Limit switch is the HOME sensor — not used here.
          * ─────────────────────────────────────────────────── */
         case STATE_BEND: {
+            system_event_t dummy;
+            while (k_msgq_get(&event_queue, &dummy, K_NO_WAIT) == 0) {}
+
             int heat_ms = (g_inputs.thickness == 1)
                           ? HEAT_TIME_1_8_MS
                           : HEAT_TIME_1_16_MS;
 
-            /* Phase 1 — heating (display already shows "Heating...") */
             printk("Heating: %d ms (thickness=%s)\n",
                    heat_ms,
                    g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
-            run_countdown(heat_ms);
+            k_sleep(K_MSEC(200));
+            printk("Heating done\n");
 
-            /* Switch display to bending phase */
-            display_msg_t dmsg = { .state = 7 };   /* state 6 = Bending screen */
-            k_msgq_put(&display_queue, &dmsg, K_NO_WAIT);
-            k_sleep(K_MSEC(50));
+            float target_deg = (float)g_inputs.bend_angle;
+            printk("BEND: moving %.1f degrees at %.1f RPM\n",
+                   (double)target_deg, (double)BEND_RPM);
+            stepper_move_degrees(target_deg, BEND_RPM);
+            printk("BEND: done. steps=%ld\n", stepper_get_steps());
 
-            /* Safety check before moving */
-            if (limit_sw_is_pressed()) {
-                printk("Bend aborted — limit switch already pressed\n");
-                g_sm.error_code = ERR_STEPPER;
-                sm_transition(STATE_ERROR);
-                break;
-            }
-
-            /* Phase 2 — bending */
-            printk("Bending: %d ms\n", BEND_TIME_MS);
-            display_update_bend_progress(0.0f);
-
-            #define BEND_STEP_DEG   2.0f    /* move in 2 degree increments */
-            float total_moved = 0.0f;
-            bool bend_error = false;
-
-            while (!limit_sw_is_pressed()) {
-                stepper_move_degrees(BEND_STEP_DEG, BEND_RPM);
-                total_moved += BEND_STEP_DEG;
-
-                /* Update progress bar — cap at 95% until switch actually triggers */
-                float progress = total_moved / HOME_MAX_DEG;
-                if (progress > 0.95f) progress = 0.95f;
-                display_update_bend_progress(progress);
-
-                /* Safety — full travel without hitting switch */
-                if (total_moved >= HOME_MAX_DEG) {
-                    printk("Bend error — limit switch not reached after full travel\n");
-                    g_sm.error_code = ERR_STEPPER;
-                    sm_transition(STATE_ERROR);
-                    bend_error = true;
-                    break;
-                }
-            }
-
-            if (!bend_error) {
-                display_update_bend_progress(1.0f);   /* show 100% */
-                k_sleep(K_MSEC(300));                 /* brief pause so user sees 100% */
-                printk("Bend complete\n");
-                g_sm.bend_complete = true;
-                sm_transition(STATE_COOL);
-            }
+            g_sm.bend_complete = true;
+            sm_transition(STATE_COOL);
             break;
         }
 
@@ -183,7 +209,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_COOL: {
             printk("Cooling: %d ms\n", COOL_TIME_MS);
-            run_countdown(COOL_TIME_MS);
+            //run_countdown(COOL_TIME_MS);
             g_sm.cool_complete = true;
             sm_transition(STATE_COMPLETE);
             break;
@@ -203,30 +229,6 @@ void state_thread(void *p1, void *p2, void *p3)
             break;
         }
 
-        /* ── HOMING ───────────────────────────────────────────
-         * Placeholder — skip to IDLE for now.
-         * ─────────────────────────────────────────────────── */
-        case STATE_HOMING:
-            
-            /* If already at home, then return to IDLE */
-            if (limit_sw_is_pressed()){
-                sm_transition(STATE_IDLE);
-                break;
-            }
-
-            stepper_move_degrees(-HOME_MAX_DEG, HOME_RPM);
-            if(limit_sw_is_pressed()){
-                printk("Homing: home position found\n");
-                stepper_reset_position();
-                stepper_move_degrees(2.0f, HOME_RPM);
-                stepper_reset_position();
-                sm_transition(STATE_IDLE);
-            }   else {
-                    printk("Homing: limit switch not found\n");
-                    g_sm.error_code = ERROR_HOMING_FAILED;
-                    sm_transition(STATE_ERROR);
-            }
-            break;
 
         /* ── ERROR ────────────────────────────────────────────
          * Hold error screen 10 s then return to IDLE.
@@ -261,6 +263,11 @@ void display_thread(void *p1, void *p2, void *p3)
 
     /* display_init() already calls direction_screen() internally */
 
+    size_t disp_stack_free;
+    k_thread_stack_space_get(k_current_get(), &disp_stack_free);
+    printk("Display thread: stack free after init: %zu / %d\n",
+           disp_stack_free, DISPLAY_STACK_SIZE);
+
     display_msg_t dmsg;
     while (1) {
         while (k_msgq_get(&display_queue, &dmsg, K_NO_WAIT) == 0) {
@@ -280,8 +287,7 @@ int main(void)
     printk("=== Acrylix boot ===\n");
     k_msleep(100);
 
-    sm_init();
-    printk("sm_init done \n");
+    limit_sw_init();
 
     if (drv8452_spi_init() != 0) {
         printk("drv8452_spi_init failed\n");
@@ -290,10 +296,10 @@ int main(void)
         printk("stepper_init failed\n");
     }
 
-    drv8452_disable();
+    sm_init();
+    printk("sm_init done \n");
 
-    limit_sw_init();
-
+    //drv8452_disable();
     printk("creating state thread \n");
     k_tid_t state_tid = k_thread_create(
         &state_thread_data, state_stack,

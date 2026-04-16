@@ -1,24 +1,3 @@
-/*
- * stepper.c — NEMA 23 via DRV8452, interrupt-driven step counting
- *
- * Motor : 23HS22-4004-ME1K  (1.8°/step = 200 full steps/rev)
- * Driver: DRV8452  |  Supply: 24 V  |  Microstep: 1/32 (CTRL2=0x06)
- *         → 6400 steps/rev
- *
- * How it works:
- *   - PWM runs continuously on TIM1_CH1 (PA8) while moving
- *   - A GPIO interrupt on the STEP pin counts each pulse
- *   - When the target count is reached the ISR kills the PWM and posts
- *     a semaphore so the calling thread can block (yields CPU) instead
- *     of busy-waiting
- *   - If the feedback pin is not wired, moves complete via open-loop timeout
- *
- * Overlay additions needed (zephyr_user node):
- *   pwms       = <&timers1 1 PERIOD_NS PWM_POLARITY_NORMAL>;
- *   dir-gpios  = <&gpiob 10 GPIO_ACTIVE_HIGH>;
- *   step-gpios = <&gpioa 8  GPIO_ACTIVE_HIGH>;   // feedback pin for counting
- */
-
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/pwm.h>
 #include <zephyr/drivers/gpio.h>
@@ -148,7 +127,7 @@ void stepper_move_degrees(float degrees, float rpm)
     if (degrees == 0.0f) return;
 
     // Account for discrepancies in micro-stepping (quick and dirty fix)
-    degrees = degrees / 2.0f; 
+    degrees = degrees / 2.0f;
 
     float abs_deg = degrees > 0.0f ? degrees : -degrees;
     long  steps   = (long)((abs_deg / 360.0f) * (float)STEPS_PER_REV);
