@@ -91,11 +91,14 @@ void sm_transition(system_state_t new_state)
 
 void sm_init(void)
 {
-    g_sm.current    = STATE_IDLE;
+    g_sm.current    = STATE_HOMING;
     g_sm.previous   = STATE_IDLE;
     g_sm.error_code = ERROR_NONE;
     printk("State machine initialized. Current state: %s\n",
            get_state_name(g_sm.current));
+    /* Notify display thread to show homing screen on first tick */
+    display_msg_t dmsg = { .state = STATE_HOMING };
+    k_msgq_put(&display_queue, &dmsg, K_NO_WAIT);
 }
 
 /* ══════════════════════════════════════════════════════════════
@@ -111,17 +114,7 @@ void idle_entry(void)
 
 void homing_entry(void)
 {
-    printk("Entering HOMING\n");
-    //drv8452_enable();
-    
-    /* If already at home */
-    if (limit_sw_is_pressed()){
-        printk("Homing: already at home \n");
-        stepper_reset_position();
-        return;
-    }
-
-    printk("Homing: moving backward \n");
+    printk("homing_entry called\n");
 }
 
 void initialization_entry(void)

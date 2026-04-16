@@ -96,7 +96,6 @@
         compatible = "zephyr,user";
         pwms      = <&pwm3 3 100000 PWM_POLARITY_NORMAL>; /* TIM3_CH3, PB0 */
         dir-gpios  = <&gpiob 1 GPIO_ACTIVE_HIGH>;          /* PB1            */
-        step-gpios = <&gpiob 0 GPIO_ACTIVE_HIGH>;          /* PB0 — EXTI on AF output for closed-loop counting */
     };
 };
 
@@ -111,7 +110,7 @@
 /* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
 &timers3 {
     status = "okay";
-    st,prescaler = <0>;
+    st,prescaler = <3>;   /* PSC=3 → div/4 → 24 MHz effective; fits 16-bit at ≥1 RPM */
 
     pwm3: pwm {
         status = "okay";

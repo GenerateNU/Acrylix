@@ -114,10 +114,10 @@ static lv_obj_t  *anim_fixed_top;
 static lv_obj_t  *anim_moving_bot;
 static lv_obj_t  *anim_moving_top;
 static lv_obj_t  *anim_value_label;
-static lv_point_t anim_fixed_bot_pts[2];
-static lv_point_t anim_fixed_top_pts[2];
-static lv_point_t anim_moving_bot_pts[2];
-static lv_point_t anim_moving_top_pts[2];
+static lv_point_precise_t anim_fixed_bot_pts[2];
+static lv_point_precise_t anim_fixed_top_pts[2];
+static lv_point_precise_t anim_moving_bot_pts[2];
+static lv_point_precise_t anim_moving_top_pts[2];
 
 /* ══════════════════════════════════════════════════════════════
  *  Thickness animation elements
@@ -609,7 +609,7 @@ static void thick_anim_create(lv_obj_t *parent)
 {
     sel_thickness = 0;
 
-    static lv_point_t base_pts[2] = {
+    static lv_point_precise_t base_pts[2] = {
         {THICK_BAR_X, THICK_BASE_Y},
         {THICK_BAR_X2, THICK_BASE_Y}
     };
@@ -619,7 +619,7 @@ static void thick_anim_create(lv_obj_t *parent)
     lv_obj_set_style_line_width(base_bar, 8, LV_PART_MAIN);
     lv_obj_set_style_line_rounded(base_bar, true, LV_PART_MAIN);
 
-    static lv_point_t acrylic_pts[2] = {
+    static lv_point_precise_t acrylic_pts[2] = {
         {THICK_BAR_X, THICK_ACRYLIC_Y},
         {THICK_BAR_X2, THICK_ACRYLIC_Y}
     };
@@ -931,7 +931,7 @@ void display_set_state(int state)
         case STATE_COOL:           process_screen("Cooling...", "");   break;
         case STATE_COMPLETE:       complete_screen();                  break;
         case STATE_ERROR:          error_screen("An error occurred."); break;
-        case 7:                    process_screen("Bending...", "");   break;
+        case STATE_HOMING:         process_screen("Homing...", "");    break;
         default: break;
     }
 }

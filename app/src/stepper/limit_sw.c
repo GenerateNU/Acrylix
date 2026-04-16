@@ -1,10 +1,12 @@
 #include "limit_sw.h"
+#include "stepper.h"
 #include <zephyr/kernel.h>
 #include <zephyr/drivers/gpio.h>
 #include <stdbool.h>
 
 static const struct device *gpioa;
 static struct gpio_callback limit_sw_cb_data;
+static volatile bool g_triggered = false;
 #define LIMIT_SW_PIN 3
 #define DEBOUNCE_MS     50
 
@@ -25,6 +27,8 @@ static void limit_sw_isr(const struct device *dev,
     last_press = now;
 
     printk("LIMIT SWITCH: hit — motor stop required\n");
+    g_triggered = true;
+    stepper_emergency_stop();
 }
 
 void limit_sw_init(void)
@@ -48,4 +52,14 @@ void limit_sw_init(void)
 bool limit_sw_is_pressed(void)
 {
     return gpio_pin_get(gpioa, LIMIT_SW_PIN) == 0;
+}
+
+bool limit_sw_triggered(void)
+{
+    return g_triggered;
+}
+
+void limit_sw_clear_trigger(void)
+{
+    g_triggered = false;
 }

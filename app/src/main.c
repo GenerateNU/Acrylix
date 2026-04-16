@@ -99,44 +99,37 @@ void state_thread(void *p1, void *p2, void *p3)
     while (1) {
         switch (g_sm.current) {
 
-       /* ── HOMING ───────────────────────────────────────────
-         * Placeholder — skip to IDLE for now.
+        /* ── HOMING ───────────────────────────────────────────
+         * Enable driver, drive backward until limit switch ISR
+         * fires (sets g_triggered flag + calls emergency_stop to
+         * unblock the move), then reset position.
          * ─────────────────────────────────────────────────── */
         case STATE_HOMING: {
-            bool homing_error = false;
-            float tot_moved = 0.0f;
+            drv8452_enable();
+            limit_sw_clear_trigger();
 
             if (limit_sw_is_pressed()) {
                 printk("Homing: already at home\n");
                 stepper_reset_position();
-                //stepper_move_degrees(2.0f, HOME_RPM);
-                stepper_reset_position();
-                sm_transition(STATE_INITIALIZATION);
+                drv8452_disable();
+                sm_transition(STATE_IDLE);
                 break;
             }
 
-            printk("Homing: moving backward\n");
-            while (!limit_sw_is_pressed()) {
-                //stepper_move_degrees(-2.0f, HOME_RPM);
-                tot_moved += 2.0f;
-                printk("moving: %.1f deg\n", (double)tot_moved);
+            printk("Homing: moving backward %.0f deg at %.1f RPM\n",
+                   (double)HOME_MAX_DEG, (double)HOME_RPM);
+            stepper_move_degrees(-HOME_MAX_DEG, HOME_RPM);
 
-                if (tot_moved >= HOME_MAX_DEG) {
-                    printk("Homing: limit switch not found after %.1f deg\n",
-                           (double)tot_moved);
-                    g_sm.error_code = ERROR_HOMING_FAILED;
-                    sm_transition(STATE_ERROR);
-                    homing_error = true;
-                    break;
-                }
-            }
-
-            if (!homing_error) {
-                printk("Homing: home found after %.1f deg\n", (double)tot_moved);
+            if (limit_sw_triggered()) {
+                printk("Homing: home found\n");
                 stepper_reset_position();
-                //stepper_move_degrees(2.0f, HOME_RPM);
-                stepper_reset_position();
-                sm_transition(STATE_INITIALIZATION);
+                drv8452_disable();
+                sm_transition(STATE_IDLE);
+            } else {
+                printk("Homing: limit switch not found — ERROR\n");
+                g_sm.error_code = ERROR_HOMING_FAILED;
+                drv8452_disable();
+                sm_transition(STATE_ERROR);
             }
             break;
         }
@@ -299,7 +292,6 @@ int main(void)
     sm_init();
     printk("sm_init done \n");
 
-    //drv8452_disable();
     printk("creating state thread \n");
     k_tid_t state_tid = k_thread_create(
         &state_thread_data, state_stack,
