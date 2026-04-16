@@ -921,6 +921,7 @@ void display_set_state(int state)
 {
     switch (state) {
         case STATE_IDLE:           direction_screen();                 break;
+        case STATE_HOMING:         direction_screen();                 break;
         case STATE_INITIALIZATION: input_selection_enter();            break;
         case STATE_BEND:           process_screen("Heating...", "");   break;
         case STATE_COOL:           process_screen("Cooling...", "");   break;
