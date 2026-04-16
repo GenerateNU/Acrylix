@@ -33,6 +33,13 @@
 #include <zephyr/sys/printk.h>
 #include "drv8452_spi.h"
 
+/* ── DIAGNOSTIC: define to disable all bit-bang GPIO activity ────────────
+ * When defined, all SPI functions become no-ops that print a skip message.
+ * Used by test/disable-drv8452-bitbang branch to isolate whether bit-bang
+ * GPIO activity on PB5-PB8 is the cause of the display crash.
+ * To re-enable normal operation, comment out or remove this define.       */
+#define DRV8452_BITBANG_DISABLED
+
 /* ── Pin assignments ────────────────────────────────────────────────────── */
 #define SPI_NCS_PIN   6   /* PB6  — nCS,  active low                        */
 #define SPI_SCLK_PIN  7   /* PB7  — SCLK, idle low                          */
@@ -54,11 +61,15 @@ static const struct device *bb_gpio;
 
 static void bb_spi_init(void)
 {
+#ifdef DRV8452_BITBANG_DISABLED
+    printk("DIAG: bb_spi_init SKIPPED (DRV8452_BITBANG_DISABLED)\n");
+#else
     bb_gpio = DEVICE_DT_GET(DT_NODELABEL(gpiob));
     gpio_pin_configure(bb_gpio, SPI_NCS_PIN,  GPIO_OUTPUT_HIGH);
     gpio_pin_configure(bb_gpio, SPI_SCLK_PIN, GPIO_OUTPUT_LOW);
     gpio_pin_configure(bb_gpio, SPI_MOSI_PIN, GPIO_OUTPUT_LOW);
     gpio_pin_configure(bb_gpio, SPI_MISO_PIN, GPIO_INPUT);
+#endif
 }
 
 /*
@@ -69,6 +80,11 @@ static void bb_spi_init(void)
  */
 static uint16_t bb_spi_transfer(uint16_t tx)
 {
+#ifdef DRV8452_BITBANG_DISABLED
+    ARG_UNUSED(tx);
+    printk("DIAG: bb_spi_transfer SKIPPED\n");
+    return 0x0000;
+#else
     uint16_t rx = 0;
 
     gpio_pin_set(bb_gpio, SPI_NCS_PIN, 0);   /* assert CS */
@@ -92,6 +108,7 @@ static uint16_t bb_spi_transfer(uint16_t tx)
     gpio_pin_set(bb_gpio, SPI_NCS_PIN, 1);   /* deassert CS */
     k_busy_wait(2);
     return rx;
+#endif
 }
 
 /* ── Register read/write helpers ────────────────────────────────────────── */
