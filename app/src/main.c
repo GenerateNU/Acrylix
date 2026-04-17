@@ -25,9 +25,9 @@
  *  Bending constants
  * ══════════════════════════════════════════════════════════════ */
 #define BEND_TIME_MS        10000   /* bending duration — adjust later */
-#define BEND_RPM            10.0f   /* RPM during bending */
+#define BEND_RPM            3.0f   /* RPM during bending */
 #define HOME_RPM            5.0f   /* RPM during homing — slow for accuracy */
-#define HOME_MAX_DEG        360.0f  /* max degrees to travel when homing */
+#define HOME_MAX_DEG        3600.0f  /* max degrees to travel when homing */
 
 /* ══════════════════════════════════════════════════════════════
  *  Message queues (definitions — declared extern in states.h)
@@ -71,6 +71,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * unblock the move), then reset position.
          * ─────────────────────────────────────────────────── */
         case STATE_HOMING: {
+            limit_sw_set_enabled(true);
             drv8452_enable();
             limit_sw_clear_trigger();
 
@@ -84,7 +85,7 @@ void state_thread(void *p1, void *p2, void *p3)
 
             printk("Homing: moving backward %.0f deg at %.1f RPM\n",
                    (double)HOME_MAX_DEG, (double)HOME_RPM);
-            stepper_move_degrees(-HOME_MAX_DEG, HOME_RPM);
+            stepper_move_degrees(HOME_MAX_DEG, HOME_RPM);
 
             if (limit_sw_triggered()) {
                 printk("Homing: home found\n");
@@ -139,7 +140,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
 
         case STATE_HEAT: {
-            #define TARGET_TEMP         150.0f   //make 150
+            #define TARGET_TEMP         20.0f   //make 150
             #define WARMUP_TIMEOUT_MS   120000
 
             printk("HEAT: starting heater, target=%.1f C\n", (double)TARGET_TEMP);
@@ -153,11 +154,11 @@ void state_thread(void *p1, void *p2, void *p3)
                 display_post_heat_temp(temp_get_ema());
                 printk("HEAT: current=%.1f C\n", (double)temp_get_ema());
                 k_sleep(K_MSEC(500));
-                if (k_uptime_get() - warmup_start > WARMUP_TIMEOUT_MS) {
+                /*if (k_uptime_get() - warmup_start > WARMUP_TIMEOUT_MS) {
                     printk("HEAT: warmup timeout\n");
                     heat_error = true;
                     break;
-                }
+                }*/
             }
 
             if (heat_error) {
@@ -209,11 +210,12 @@ void state_thread(void *p1, void *p2, void *p3)
          * Limit switch is the HOME sensor — not used here.
          * ─────────────────────────────────────────────────── */
         case STATE_BEND: {
-
-            float target_deg = (float)g_inputs.bend_angle;
+            float target_deg = (float)g_inputs.bend_angle*10;
             printk("BEND: moving %.1f degrees at %.1f RPM\n",
                    (double)target_deg, (double)BEND_RPM);
-            stepper_move_degrees(target_deg, BEND_RPM);
+            limit_sw_set_enabled(false);
+            stepper_move_degrees(-target_deg, BEND_RPM);
+            limit_sw_set_enabled(true);
             printk("BEND: done. steps=%ld\n", stepper_get_steps());
 
             g_sm.bend_complete = true;
@@ -260,8 +262,8 @@ void state_thread(void *p1, void *p2, void *p3)
             system_event_t evt;
             k_sleep(K_MSEC(500));
             if (k_msgq_get(&event_queue, &evt, K_MSEC(100)) == 0) {
-                if (evt == EVT_START_IDLE) {
-                    sm_transition(STATE_IDLE);
+                if (evt == EVT_START_HOMING) {
+                    sm_transition(STATE_HOMING);
                 }
             }
             break;

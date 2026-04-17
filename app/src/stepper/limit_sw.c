@@ -7,6 +7,7 @@
 static const struct device *gpioa;
 static struct gpio_callback limit_sw_cb_data;
 static volatile bool g_triggered = false;
+static volatile bool g_enabled   = true;
 #define LIMIT_SW_PIN 3
 #define DEBOUNCE_MS     50
 
@@ -16,6 +17,8 @@ static void limit_sw_isr(const struct device *dev,
 {
     static int64_t last_press = 0;
     int64_t now = k_uptime_get();
+
+    if (!g_enabled) return;
 
     if (gpio_pin_get(gpioa, LIMIT_SW_PIN) != 0) {
         return;
@@ -62,4 +65,9 @@ bool limit_sw_triggered(void)
 void limit_sw_clear_trigger(void)
 {
     g_triggered = false;
+}
+
+void limit_sw_set_enabled(bool en)
+{
+    g_enabled = en;
 }

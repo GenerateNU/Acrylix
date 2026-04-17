@@ -93,8 +93,8 @@ void sm_transition(system_state_t new_state)
 
 void sm_init(void)
 {
-    g_sm.current    = STATE_HOMING;
-    g_sm.previous   = STATE_IDLE;
+    g_sm.current    = STATE_HOMING; //starts homing
+    g_sm.previous   = STATE_IDLE;   //starts idle
     g_sm.error_code = ERROR_NONE;
     printk("State machine initialized. Current state: %s\n",
            get_state_name(g_sm.current));
@@ -135,19 +135,10 @@ void bend_entry(void)
     printk("Entering BEND — angle: %d deg, thickness: %s\n",
            g_inputs.bend_angle,
            g_inputs.thickness == 1 ? "1/8 in" : "1/16 in");
+    limit_sw_set_enabled(false);
+    limit_sw_clear_trigger();
     drv8452_enable();
-
-    if(limit_sw_is_pressed()){
-        printk("Bend entry: limit switch pressed \n");
-        g_sm.error_code = ERR_STEPPER;
-    }
-
-    if (limit_sw_is_pressed()){
-        stepper_reset_position();
-        sm_transition(STATE_IDLE);
-    }
-
-    printk("Bend entry: motor enable, heater on \n");
+    printk("Bend entry: limit switch disabled, motor enabled\n");
 }
 
 void cool_entry(void)
