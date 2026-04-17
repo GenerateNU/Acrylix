@@ -25,9 +25,9 @@
  *  Bending constants
  * ══════════════════════════════════════════════════════════════ */
 #define BEND_TIME_MS        10000   /* bending duration — adjust later */
-#define BEND_RPM            3.0f   /* RPM during bending */
-#define HOME_RPM            5.0f   /* RPM during homing — slow for accuracy */
-#define HOME_MAX_DEG        3600.0f  /* max degrees to travel when homing */
+#define BEND_RPM            0.3f   /* RPM during bending */
+#define HOME_RPM            0.5f   /* RPM during homing — slow for accuracy */
+#define HOME_MAX_DEG        360.0f   /* max output-shaft degrees when homing (1 full rev) */
 
 /* ══════════════════════════════════════════════════════════════
  *  Message queues (definitions — declared extern in states.h)
@@ -78,6 +78,7 @@ void state_thread(void *p1, void *p2, void *p3)
             if (limit_sw_is_pressed()) {
                 printk("Homing: already at home\n");
                 stepper_reset_position();
+                limit_sw_set_enabled(false);
                 drv8452_disable();
                 sm_transition(STATE_IDLE);
                 break;
@@ -87,6 +88,7 @@ void state_thread(void *p1, void *p2, void *p3)
                    (double)HOME_MAX_DEG, (double)HOME_RPM);
             stepper_move_degrees(HOME_MAX_DEG, HOME_RPM);
 
+            limit_sw_set_enabled(false);
             if (limit_sw_triggered()) {
                 printk("Homing: home found\n");
                 stepper_reset_position();
@@ -210,12 +212,10 @@ void state_thread(void *p1, void *p2, void *p3)
          * Limit switch is the HOME sensor — not used here.
          * ─────────────────────────────────────────────────── */
         case STATE_BEND: {
-            float target_deg = (float)g_inputs.bend_angle*10;
+            float target_deg = (float)g_inputs.bend_angle;
             printk("BEND: moving %.1f degrees at %.1f RPM\n",
                    (double)target_deg, (double)BEND_RPM);
-            limit_sw_set_enabled(false);
             stepper_move_degrees(-target_deg, BEND_RPM);
-            limit_sw_set_enabled(true);
             printk("BEND: done. steps=%ld\n", stepper_get_steps());
 
             g_sm.bend_complete = true;

@@ -49,6 +49,8 @@ static const struct device *bb_gpio;
 #define CTRL1_EN_OUT_SET  0x8Fu
 /* CTRL1: EN_OUT=0, same TOFF/DECAY defaults → 0x0F */
 #define CTRL1_EN_OUT_CLR  0x0Fu
+/* CTRL2: MICROSTEP_MODE = 0000b = full step 100% current */
+#define CTRL2_FULL_STEP   0x00u
 
 /* ── Bit-bang SPI ───────────────────────────────────────────────────────── */
 
@@ -131,6 +133,9 @@ int drv8452_spi_init(void)
         return -EIO;
     }
 
+    /* Set full step mode (100% current) before readback */
+    drv_write_raw(REG_CTRL2, CTRL2_FULL_STEP);
+
     /* Read and decode CTRL2 microstep mode */
     uint16_t ctrl2_rx = drv_read_raw(REG_CTRL2);
     uint8_t ctrl2 = ctrl2_rx & 0xFF;
@@ -139,15 +144,18 @@ int drv8452_spi_init(void)
     const char *ms_str;
     int ms_div;
     switch (ms_mode) {
-        case 0x0: ms_str = "1/100"; ms_div = 100; break;
-        case 0x1: ms_str = "1/2";   ms_div = 2;   break;
-        case 0x2: ms_str = "1/4";   ms_div = 4;   break;
-        case 0x3: ms_str = "1/8";   ms_div = 8;   break;
-        case 0x4: ms_str = "1/16";  ms_div = 16;  break;
-        case 0x5: ms_str = "1/32";  ms_div = 32;  break;
-        case 0x6: ms_str = "1/4 (ripple)"; ms_div = 4; break;
-        case 0x7: ms_str = "1/8 (ripple)"; ms_div = 8; break;
-        default:  ms_str = "unknown"; ms_div = 0;  break;
+        case 0x0: ms_str = "Full step 100%";    ms_div = 1;   break;
+        case 0x1: ms_str = "Full step 71%";     ms_div = 1;   break;
+        case 0x2: ms_str = "Non-circular 1/2";  ms_div = 2;   break;
+        case 0x3: ms_str = "1/2";               ms_div = 2;   break;
+        case 0x4: ms_str = "1/4";               ms_div = 4;   break;
+        case 0x5: ms_str = "1/8";               ms_div = 8;   break;
+        case 0x6: ms_str = "1/16";              ms_div = 16;  break;
+        case 0x7: ms_str = "1/32";              ms_div = 32;  break;
+        case 0x8: ms_str = "1/64";              ms_div = 64;  break;
+        case 0x9: ms_str = "1/128";             ms_div = 128; break;
+        case 0xA: ms_str = "1/256";             ms_div = 256; break;
+        default:  ms_str = "unknown";            ms_div = 0;   break;
     }
     printk("DRV8452: CTRL2=0x%02X MICROSTEP_MODE=%d = %s (%d steps/rev)\n",
            ctrl2, ms_mode, ms_str, 200 * ms_div);

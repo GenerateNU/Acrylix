@@ -110,7 +110,7 @@
 /* TIM3_CH3 on PB0 — STEP PWM output to DRV8452 */
 &timers3 {
     status = "okay";
-    st,prescaler = <3>;
+    st,prescaler = <1499>;  /* 96 MHz / 1500 = 64 kHz → max step period ~1.024 s */
 
     pwm3: pwm {
         status = "okay";
@@ -136,15 +136,15 @@
         #size-cells    = <0>;
 
         ili9341: ili9341@0 {
-            compatible        = "ilitek,ili9340";
+            compatible        = "ilitek,ili9341";
             mipi-max-frequency = <25000000>;
             reg          = <0>;
-            width        = <320>;
-            height       = <240>;
-            pixel-format = <0>;    /* RGB565 */
-            rotation     = <90>;
+            width        = <240>;
+            height       = <320>;
+            pixel-format = <PANEL_PIXEL_FORMAT_RGB_565X>;
+            rotation     = <270>;
             frmctr1  = [00 1b];
-            pwctrl1  = [26 00];
+            pwctrl1  = [10];
             vmctrl1  = [31 3c];
             vmctrl2  = [c0];
             pgamctrl = [0f 22 1f 0a 0e 06 4d 76 3b 03 0e 04 13 0e 0c];

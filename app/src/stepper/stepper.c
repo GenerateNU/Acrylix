@@ -12,8 +12,10 @@ static const struct gpio_dt_spec dir_pin  = GPIO_DT_SPEC_GET(ZEPHYR_USER_NODE, d
 
 /* ── Motor config ─────────────────────────────────────────────────────────── */
 #define FULL_STEPS_PER_REV  200UL
-#define MICROSTEPS          32UL    /* DRV8452 CTRL2=0x06 = 1/32 microstepping */
-#define STEPS_PER_REV       (FULL_STEPS_PER_REV * MICROSTEPS)  /* 6400 */
+#define MICROSTEPS          1UL     /* DRV8452 CTRL2=0x00 = full step mode */
+#define GEAR_RATIO          10.0f   /* tune: commanded_deg / actual_deg × current value */
+#define STEPS_PER_REV_F     ((float)FULL_STEPS_PER_REV * (float)MICROSTEPS * GEAR_RATIO)
+#define STEP_PERIOD_NS_MAX  20000000U   /* ~0.03 RPM at motor output with 10:1 gearbox */
 
 #define DIR_FORWARD     1
 #define DIR_BACKWARD    0
@@ -42,8 +44,8 @@ int stepper_init(void)
     /* DIR pin: output, default low (backward) until first move */
     gpio_pin_configure_dt(&dir_pin, GPIO_OUTPUT_INACTIVE);
 
-    printk("Stepper init OK — %lu steps/rev (1/%lu microstep)\n",
-           STEPS_PER_REV, MICROSTEPS);
+    printk("Stepper init OK — %.1f steps/rev (gear %.1f)\n",
+           (double)STEPS_PER_REV_F, (double)GEAR_RATIO);
     return 0;
 }
 
@@ -101,18 +103,14 @@ void stepper_move_degrees(float degrees, float rpm)
 {
     if (degrees == 0.0f) return;
 
-    // Account for discrepancies in micro-stepping (quick and dirty fix)
-    degrees = degrees / 2.0f;
-
     float abs_deg = degrees > 0.0f ? degrees : -degrees;
-    long  steps   = (long)((abs_deg / 360.0f) * (float)STEPS_PER_REV);
+    long  steps   = (long)((abs_deg / 360.0f) * (float)STEPS_PER_REV_F);
     if (steps == 0) return;
 
     /* step_period_ns = (60 / (rpm * steps_per_rev)) * 1e9 */
-    uint32_t period_ns = (uint32_t)((60.0f / (rpm * (float)STEPS_PER_REV)) * 1e9f);
-    if (period_ns < 5000U)    period_ns = 5000U;    /* 200 kHz max */
-    if (period_ns > 2000000U) period_ns = 2000000U; /* 0.5 Hz min  */
-
+    uint32_t period_ns = (uint32_t)((60.0f / (rpm * (float)STEPS_PER_REV_F)) * 1e9f);
+    if (period_ns < 31250U)   period_ns = 31250U;   /* 2 counts min @ 64 kHz */
+    if (period_ns > STEP_PERIOD_NS_MAX) period_ns = STEP_PERIOD_NS_MAX;
     int dir = (degrees > 0.0f) ? DIR_FORWARD : DIR_BACKWARD;
     do_move(steps, period_ns, dir);
 
@@ -120,4 +118,4 @@ void stepper_move_degrees(float degrees, float rpm)
 }
 
 long  stepper_get_steps(void)   { return g_current_steps; }
-float stepper_get_degrees(void) { return (g_current_steps * 360.0f) / (float)STEPS_PER_REV; }
+float stepper_get_degrees(void) { return (g_current_steps * 360.0f) / (float)STEPS_PER_REV_F; }

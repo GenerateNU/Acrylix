@@ -7,7 +7,7 @@
 static const struct device *gpioa;
 static struct gpio_callback limit_sw_cb_data;
 static volatile bool g_triggered = false;
-static volatile bool g_enabled   = true;
+static volatile bool g_enabled   = false;
 #define LIMIT_SW_PIN 3
 #define DEBOUNCE_MS     50
 
