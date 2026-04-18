@@ -150,8 +150,7 @@ void cool_entry(void)
 void complete_entry(void)
 {
     printk("Entering COMPLETE\n");
-    drv8452_disable();
-    /* Display already updated via display_queue in sm_transition */
+    /* Motor stays enabled — HOMING will manage the return move and disable at home */
 }
 
 void error_entry(void)

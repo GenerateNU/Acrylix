@@ -42,6 +42,7 @@
 static const struct device *bb_gpio;
 
 /* ── Register addresses ────────────────────────────────────────────────── */
+#define REG_FAULT   0x00u
 #define REG_CTRL1   0x04u
 #define REG_CTRL2   0x05u
 
@@ -49,6 +50,8 @@ static const struct device *bb_gpio;
 #define CTRL1_EN_OUT_SET  0x8Fu
 /* CTRL1: EN_OUT=0, same TOFF/DECAY defaults → 0x0F */
 #define CTRL1_EN_OUT_CLR  0x0Fu
+/* CLR_FLT: bit 6 of CTRL1 — write 1 to clear latched faults, auto-resets to 0 */
+#define CLR_FLT_BIT       0x40u
 /* CTRL2: MICROSTEP_MODE = 0000b = full step 100% current */
 #define CTRL2_FULL_STEP   0x00u
 
@@ -160,6 +163,13 @@ int drv8452_spi_init(void)
     printk("DRV8452: CTRL2=0x%02X MICROSTEP_MODE=%d = %s (%d steps/rev)\n",
            ctrl2, ms_mode, ms_str, 200 * ms_div);
 
+    /* Dump all CTRL and FAULT registers to identify CLR_FLT location and defaults */
+    for (uint8_t reg = 0x00; reg <= 0x0Au; reg++) {
+        uint16_t rx = drv_read_raw(reg);
+        printk("DRV8452: reg[0x%02X] = 0x%02X (status=0x%02X)\n",
+               reg, (uint8_t)(rx & 0xFF), (uint8_t)(rx >> 8));
+    }
+
     printk("DRV8452: init OK\n");
     return 0;
 }
@@ -174,4 +184,31 @@ void drv8452_disable(void)
 {
     drv_write_raw(REG_CTRL1, CTRL1_EN_OUT_CLR);
     printk("DRV8452: EN_OUT=0 (disabled)\n");
+}
+
+void drv8452_set_current(uint8_t ctrl2_val)
+{
+    drv_write_raw(REG_CTRL2, ctrl2_val);
+    printk("DRV8452: CTRL2=0x%02X\n", ctrl2_val);
+}
+
+uint8_t drv8452_read_fault(void)
+{
+    uint16_t rx = drv_read_raw(REG_FAULT);
+    return (uint8_t)(rx & 0xFF);
+}
+
+void drv8452_hold(void)
+{
+    uint8_t fault = drv8452_read_fault();
+    if (fault) {
+        /* Clear latched fault (e.g. stall from bend move) then re-assert EN_OUT */
+        drv_write_raw(REG_CTRL1, CTRL1_EN_OUT_SET | CLR_FLT_BIT);
+        k_busy_wait(100);
+        drv_write_raw(REG_CTRL1, CTRL1_EN_OUT_SET);
+        uint8_t fault_after = drv8452_read_fault();
+        if (fault_after) {
+            printk("DRV8452: HOLD — FAULT=0x%02X persistent after CLR_FLT\n", fault_after);
+        }
+    }
 }

@@ -17,9 +17,9 @@
  *  Heating time constants
  * ══════════════════════════════════════════════════════════════ */
 
-#define HEAT_TIME_1_16_MS   10000   /* 1/16 in — 10 s */
-#define HEAT_TIME_1_8_MS     5000   /* 1/8 in  — 5 s  */
-#define COOL_TIME_MS        10000   /* cooling duration */
+#define HEAT_TIME_1_16_MS   240000   /* 1/16 in — 10 s */
+#define HEAT_TIME_1_8_MS    240000   /* 1/8 in  — 5 s  */
+#define COOL_TIME_MS        120000   /* cooling duration */
 
 /* ══════════════════════════════════════════════════════════════
  *  Bending constants
@@ -72,13 +72,28 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
         case STATE_HOMING: {
             limit_sw_set_enabled(true);
+            drv8452_set_current(0x00u);  /* restore 100% current for homing move */
+
+            /* Wait for any thermal fault to clear before moving */
+            {
+                int64_t fault_wait_start = k_uptime_get();
+                while (drv8452_read_fault()) {
+                    if (k_uptime_get() - fault_wait_start > 15000) {
+                        printk("Homing: fault did not clear after 15s\n");
+                        break;
+                    }
+                    drv8452_disable();
+                    k_msleep(500);
+                    drv8452_enable();
+                }
+            }
+
             drv8452_enable();
             limit_sw_clear_trigger();
 
             if (limit_sw_is_pressed()) {
                 printk("Homing: already at home\n");
                 stepper_reset_position();
-                limit_sw_set_enabled(false);
                 drv8452_disable();
                 sm_transition(STATE_IDLE);
                 break;
@@ -88,7 +103,6 @@ void state_thread(void *p1, void *p2, void *p3)
                    (double)HOME_MAX_DEG, (double)HOME_RPM);
             stepper_move_degrees(HOME_MAX_DEG, HOME_RPM);
 
-            limit_sw_set_enabled(false);
             if (limit_sw_triggered()) {
                 printk("Homing: home found\n");
                 stepper_reset_position();
@@ -142,7 +156,7 @@ void state_thread(void *p1, void *p2, void *p3)
          * ─────────────────────────────────────────────────── */
 
         case STATE_HEAT: {
-            #define TARGET_TEMP         20.0f   //make 150
+            #define TARGET_TEMP         150.0f   //make 150
             #define WARMUP_TIMEOUT_MS   120000
 
             printk("HEAT: starting heater, target=%.1f C\n", (double)TARGET_TEMP);
@@ -215,7 +229,11 @@ void state_thread(void *p1, void *p2, void *p3)
             float target_deg = (float)g_inputs.bend_angle;
             printk("BEND: moving %.1f degrees at %.1f RPM\n",
                    (double)target_deg, (double)BEND_RPM);
+            limit_sw_set_enabled(false);
             stepper_move_degrees(-target_deg, BEND_RPM);
+            limit_sw_set_enabled(true);
+            drv8452_set_current(0x01u);  /* 71% current for hold — halves heat, avoids OTW */
+            drv8452_hold();
             printk("BEND: done. steps=%ld\n", stepper_get_steps());
 
             g_sm.bend_complete = true;
@@ -240,6 +258,7 @@ void state_thread(void *p1, void *p2, void *p3)
                 g_progress.sec = (rem_ms % 60000) / 1000;
                 __DMB();
                 g_progress.pending = true;
+                drv8452_hold();  /* keep EN_OUT=1 while arm cools at bend angle */
                 k_sleep(K_MSEC(500));
             }
             g_progress.pct = 100;
@@ -259,13 +278,9 @@ void state_thread(void *p1, void *p2, void *p3)
          * to restart.
          * ─────────────────────────────────────────────────── */
         case STATE_COMPLETE: {
-            system_event_t evt;
-            k_sleep(K_MSEC(500));
-            if (k_msgq_get(&event_queue, &evt, K_MSEC(100)) == 0) {
-                if (evt == EVT_START_HOMING) {
-                    sm_transition(STATE_HOMING);
-                }
-            }
+            /* Show complete screen for 3 s, then home the arm slowly */
+            k_sleep(K_SECONDS(3));
+            sm_transition(STATE_HOMING);
             break;
         }
 

@@ -13,7 +13,7 @@
 #define INTEGRAL_MIN -500
 
 static double integral_term = 0.0;
-static double setpoint      = 150.0;
+static double setpoint      = 175.0;
 
 static double update_pi(double input_value)
 {
